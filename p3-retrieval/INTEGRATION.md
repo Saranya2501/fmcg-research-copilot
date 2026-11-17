@@ -12,6 +12,15 @@ python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
 
+Copy the cert from the shared Plan folder and the env template:
+
+```bash
+mkdir -p certs
+cp "../Plan/VM02_Embeddings_Access/vm02-ca.crt" certs/vm02-ca.crt
+cp .env.template .env
+# open .env and fill in IITK_EMBED_KEY (from shared-embedding-key.txt) and IITK_API_KEY
+```
+
 Pre-built indexes are in `index/` — no rebuild needed to start. If rebuilding from scratch (~20 min on CPU):
 
 ```bash
@@ -144,7 +153,8 @@ Pending: Nestle FY23 annual report + quarterly/presentations for Dabur, Marico, 
 
 ## Performance
 
-- **First call:** ~10–15s to load model weights (~500 MB) into memory. Subsequent calls are fast.
+- **First call (with API configured):** ~1–2s — query encoding goes to the UpGrad embedding API, no local model download. Only the reranker (~270 MB) loads locally.
+- **First call (API not configured / fallback):** ~10–15s to also load the embedder (~130 MB).
 - `retrieve()` latency: ~1s per query on CPU (BM25 + FAISS + RRF + reranker)
 - `get_table()` latency: <100ms (index lookup only, no model inference)
 - Models are lazy-loaded on first `retrieve()` call, not at import time.
