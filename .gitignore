@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+
+# Secrets — never commit
+.env
+certs/
+
+# Large generated files — share via Google Drive
+p3-retrieval/index/
+p3-retrieval/parsed/
+
+# Corpus PDFs — too large for git
+Corpus/
+
+# OS
+.DS_Store
+Thumbs.db
