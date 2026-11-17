@@ -10,6 +10,7 @@ Usage:
 """
 
 import json
+import os
 import pickle
 import re
 import warnings
@@ -17,10 +18,13 @@ from pathlib import Path
 from typing import Optional
 
 import faiss
+import httpx
 import numpy as np
+from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
+load_dotenv()
 warnings.filterwarnings("ignore")
 
 # ── Paths ────────────────────────────────────────────────────────────────────
@@ -45,9 +49,52 @@ DATA_DELIMITER_OPEN = "<<DATA>>"
 DATA_DELIMITER_CLOSE = "<<END DATA>>"
 
 
+def _embed_via_api(texts: list[str]) -> np.ndarray:
+    """Call UpGrad embedding API. Returns L2-normalised float32 array (n, 384)."""
+    url = os.environ["IITK_EMBED_URL"]
+    key = os.environ["IITK_EMBED_KEY"]
+    cert_path = Path(os.getenv("CACERT_PATH", "certs/vm02-ca.crt"))
+    if not cert_path.is_absolute():
+        cert_path = RAG_DIR / cert_path
+    verify: object = str(cert_path) if cert_path.exists() else False
+
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), 16):
+        batch = texts[i : i + 16]
+        resp = httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": "bge-small-en-v1.5", "input": batch},
+            verify=verify,
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        data = sorted(resp.json()["data"], key=lambda x: x["index"])
+        all_embeddings.extend(item["embedding"] for item in data)
+
+    vecs = np.array(all_embeddings, dtype=np.float32)
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    return vecs / np.maximum(norms, 1e-10)
+
+
+def _encode(texts: list[str]) -> np.ndarray:
+    """Encode texts via API if configured, else local SentenceTransformer."""
+    global _embedder
+    if os.getenv("IITK_EMBED_URL") and os.getenv("IITK_EMBED_KEY"):
+        try:
+            return _embed_via_api(texts)
+        except Exception as exc:
+            warnings.warn(f"Embedding API failed ({exc}), falling back to local model")
+    if _embedder is None:
+        _embedder = SentenceTransformer(EMBED_MODEL)
+    vecs = _embedder.encode(texts, normalize_embeddings=True)
+    return np.array(vecs, dtype=np.float32)
+
+
 def _load_models():
     global _embedder, _reranker
-    if _embedder is None:
+    # Skip local embedder load when the API is configured — _encode() handles lazy loading
+    if _embedder is None and not (os.getenv("IITK_EMBED_URL") and os.getenv("IITK_EMBED_KEY")):
         _embedder = SentenceTransformer(EMBED_MODEL)
     if _reranker is None:
         _reranker = CrossEncoder(RERANK_MODEL)
@@ -159,8 +206,7 @@ def retrieve(
     bm25_ranked = bm25_ranked[:BM25_CANDIDATES]
 
     # ── Dense retrieval ───────────────────────────────────────────────────
-    query_vec = _embedder.encode([query], normalize_embeddings=True)
-    query_vec = np.array(query_vec, dtype=np.float32)
+    query_vec = _encode([query])
     n_dense = min(DENSE_CANDIDATES * 5, _faiss_index.ntotal)
     scores_dense, idx_dense = _faiss_index.search(query_vec, n_dense)
     dense_ranked = [_faiss_ids[i] for i in idx_dense[0] if i >= 0]
