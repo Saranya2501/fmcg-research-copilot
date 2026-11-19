@@ -10,6 +10,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+
+from tracing import trace_step, update_observation
 
 
 @contextmanager
@@ -71,6 +76,21 @@ def positive_setting(name: str, default: int) -> int:
     if value < 1:
         raise ValueError(f"{name} must be a positive integer")
     return value
+
+
+def process_chat_turn(question: str, conversation_id: str) -> str:
+    with trace_step("process-chat-turn", question=question, conversation_id=conversation_id) as turn:
+        save_message(conversation_id, "user", question)
+        with trace_step("respond-preview", question=question, conversation_id=conversation_id) as response:
+            reply = (
+                "I'm ready to help with your research. This is a preview of the chat; "
+                "the research agent still needs to be connected before I can look up "
+                "filings and provide an answer with citations."
+            )
+            update_observation(response, output=reply)
+        save_message(conversation_id, "assistant", reply)
+        update_observation(turn, output=reply)
+    return reply
 
 
 def main() -> None:
@@ -137,18 +157,10 @@ def main() -> None:
             st.warning(f"Message limit reached. Try again in {retry_after} seconds.")
             return
         question = question.strip()
-        save_message(st.session_state.active_conversation_id, "user", question)
-        st.session_state.messages.append({"role": "user", "content": question})
         with st.chat_message("user"):
             st.markdown(question)
 
-        reply = (
-            "I'm ready to help with your research. This is a preview of the chat; "
-            "the research agent still needs to be connected before I can look up "
-            "filings and provide an answer with citations."
-        )
-        save_message(st.session_state.active_conversation_id, "assistant", reply)
-        st.session_state.messages.append({"role": "assistant", "content": reply})
+        reply = process_chat_turn(question, st.session_state.active_conversation_id)
         with st.chat_message("assistant"):
             st.markdown(reply)
         st.rerun()

@@ -46,7 +46,44 @@ From the repository root, using Python 3.11 or later:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r p5-deployment/requirements.txt
+cp p5-deployment/.env.example p5-deployment/.env
 streamlit run p5-deployment/app.py
+```
+
+Edit `p5-deployment/.env` to configure rate limits, the optional history path, and
+Langfuse credentials. The app loads this file automatically; existing environment
+variables take priority. Restart Streamlit after changing configuration. `.env` is
+excluded from Git.
+
+## Langfuse tracing
+
+The app uses Langfuse Python SDK 5.2.0 (for Langfuse Cloud / platform v4).
+Fill `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` in
+`p5-deployment/.env`, then restart Streamlit. Docker Compose also passes this
+optional file into the container without baking credentials into the image.
+
+Each accepted chat turn creates a `process-chat-turn` trace, with a child
+`respond-preview` span. The conversation UUID becomes the Langfuse session ID,
+grouping turns from reopened chats. Rate-limited messages and UI reruns do not
+create traces. Preview spans carry `mode=preview` and `agent_connected=false`;
+there are no model names, token counts, or invented generation observations.
+
+The client is reused across Streamlit reruns and exports in the background.
+Missing credentials or `LANGFUSE_TRACING_ENABLED=false` disable tracing. Trace
+setup/export problems do not retry or duplicate a chat operation. Application
+failures are marked with a generic error status without exporting raw exception
+text. The exporter masks common email addresses, sk-/pk- keys, and bearer tokens.
+This is basic masking, not a comprehensive detector for all sensitive content.
+Credentials, SQLite paths, and the entire application state are never trace inputs.
+
+Use Traces for individual turns and Sessions for complete conversations.
+`LANGFUSE_ENVIRONMENT` can distinguish development from deployment runs.
+Restart the app after changing keys or tracing configuration.
+
+Run the offline tracing checks:
+
+```bash
+.venv/bin/python -m unittest discover -s p5-deployment/tests -v
 ```
 
 ## Rate limit
@@ -69,6 +106,7 @@ public deployment across sessions or servers.
 
 - `app.py` — Streamlit chat interface with session history and an explicit preview status
 - `requirements.txt` — dependencies for the current Streamlit starter
+- `tracing.py` — session-aware tracing, masking, and optional client setup
 - `Dockerfile` — Python 3.11 image with a non-root user and health check
 - `docker-compose.yml` — app service available locally on port 8501
 - `../.dockerignore` — excludes credentials and generated data from the build context
@@ -78,5 +116,8 @@ public deployment across sessions or servers.
 Connect P4's agent to the chat input, then render its answer and citations.
 Add P2/P4 dependencies and source files to the image when that interface is ready.
 Retrieval will need the three P3 index files plus `parsed/all_chunks.jsonl`, supplied
-as mounted data rather than baked into the image. Langfuse tracing and evaluation
-with trace output remain to be implemented; this starter does not require API keys.
+as mounted data rather than baked into the image. When P4/P2 arrive, replace the
+preview response with the agent and use Langfuse's framework integration inside
+the turn trace to capture each model call, its usage, and retrieval/tool steps.
+Evaluation with trace output remains to be implemented. Tracing is optional and
+the preview chat can run without API keys.

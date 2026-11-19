@@ -6,6 +6,9 @@ services:
     ports:
       - "127.0.0.1:8501:8501"
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - chat-history:/app/p5-deployment/data
 

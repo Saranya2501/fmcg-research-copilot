@@ -13,6 +13,7 @@ RUN pip install -r /app/p5-deployment/requirements.txt \
     && chown appuser:appuser /app/p5-deployment/data
 
 COPY --chown=appuser:appuser p5-deployment/app.py /app/p5-deployment/app.py
+COPY --chown=appuser:appuser p5-deployment/tracing.py /app/p5-deployment/tracing.py
 
 USER appuser
 EXPOSE 8501
