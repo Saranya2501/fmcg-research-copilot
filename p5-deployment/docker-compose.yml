@@ -1,0 +1,13 @@
+services:
+  streamlit:
+    build:
+      context: ..
+      dockerfile: p5-deployment/Dockerfile
+    ports:
+      - "127.0.0.1:8501:8501"
+    restart: unless-stopped
+    volumes:
+      - chat-history:/app/p5-deployment/data
+
+volumes:
+  chat-history:

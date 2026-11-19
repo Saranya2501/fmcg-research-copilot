@@ -20,3 +20,6 @@ Corpus/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local conversation history
+p5-deployment/data/

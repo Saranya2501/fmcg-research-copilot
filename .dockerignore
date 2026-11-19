@@ -1,0 +1,13 @@
+.git
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/venv
+**/.env
+**/.env.*
+**/certs
+Corpus
+p3-retrieval/index
+p3-retrieval/parsed
+p5-deployment/data
+.DS_Store
