@@ -155,9 +155,24 @@ Pending: Nestle FY23 annual report + quarterly/presentations for Dabur, Marico, 
 
 - **First call (with API configured):** ~1–2s — query encoding goes to the UpGrad embedding API, no local model download. Only the reranker (~270 MB) loads locally.
 - **First call (API not configured / fallback):** ~10–15s to also load the embedder (~130 MB).
-- `retrieve()` latency: ~1s per query on CPU (BM25 + FAISS + RRF + reranker)
+- `retrieve()` latency: ~1.1s per query on CPU (BM25 + FAISS + RRF + reranker)
 - `get_table()` latency: <100ms (index lookup only, no model inference)
 - Models are lazy-loaded on first `retrieve()` call, not at import time.
+
+### Recall evaluation (gold_v1.jsonl, 100 questions, 2026-11-19)
+
+| Metric | All 100 Qs | Excl. UC7 refusals (88 Qs) | Target |
+|--------|-----------|---------------------------|--------|
+| Recall@5  | 0.700 | **0.795** | 0.70 |
+| Recall@10 | 0.730 | **0.830** | 0.80 |
+
+UC7 (12 refusal/out-of-scope questions) always score as misses in doc-id recall — they have no gold source document, not a retrieval failure. Excluding them, both targets are met.
+
+**Remaining miss patterns (non-UC7):**
+- ITC FMCG segment queries: quarterly investor presentations rank above annual reports for segment data — both sources contain the data, so the agent will still find useful evidence.
+- Tata Consumer EBITDA: 2 misses across FY23 — EBITDA is not explicitly labelled in that doc's parsed chunks, requiring the agent to calculate from P&L lines.
+
+**get_table() note:** returns `low_confidence: True` for most financial statement pages — annual report tables are parsed as free-form text without `[TABLE]` markers. Use the `text_fallback` field; it contains the raw table content and is reliable.
 
 ---
 
