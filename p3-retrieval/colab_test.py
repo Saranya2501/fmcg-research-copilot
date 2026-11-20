@@ -31,7 +31,19 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "-q"] + packages)
 print("Packages installed.")
 
 
-# ── CELL 2: Mount Google Drive and set paths ─────────────────
+# ── CELL 2: Set IITK API credentials (optional but recommended) ──────────────
+# If you have the IITK embedding API key, set it here.
+# retrieve() will use the API (fast: ~1s) instead of the local model (~15s cold start).
+# Both use the same model (bge-small-en-v1.5) so results are identical.
+# Leave IITK_EMBED_KEY empty to fall back to local SentenceTransformer.
+
+import os
+os.environ["IITK_EMBED_URL"] = "https://103.42.50.41:1035/v1/embeddings"
+os.environ["IITK_EMBED_KEY"] = ""   # ← paste your key from shared-embedding-key.txt
+os.environ["CACERT_PATH"]    = ""   # ← paste full path to vm02-ca.crt, or leave empty to skip cert verify
+
+
+# ── CELL 3: Mount Google Drive and set paths ─────────────────
 
 try:
     from google.colab import drive
@@ -60,7 +72,7 @@ print(f"  index dir:  {P3_DIR / 'index'} — exists: {(P3_DIR / 'index').exists(
 print(f"  parsed dir: {P3_DIR / 'parsed'} — exists: {(P3_DIR / 'parsed').exists()}")
 
 
-# ── CELL 3: Override RAG_DIR so retrieve.py finds index/parsed ──
+# ── CELL 4: Override RAG_DIR so retrieve.py finds index/parsed ──
 # retrieve.py uses Path(__file__).parent — patch it after import
 # by setting the module-level RAG_DIR to point to P3_DIR.
 
@@ -83,7 +95,7 @@ from retrieve import _chunk_map
 print(f"Index loaded: {len(_chunk_map):,} chunks ready.")
 
 
-# ── CELL 4: Search helper — pretty-prints results ────────────
+# ── CELL 5: Search helper — pretty-prints results ────────────
 
 def search(
     query: str,
@@ -172,7 +184,7 @@ def show_table(doc_id: str, page: int = None, section_hint: str = None):
     return result
 
 
-# ── CELL 5: Sample queries — edit and re-run as you like ─────
+# ── CELL 6: Sample queries — edit and re-run as you like ─────
 
 # Single-company metric lookup (UC1)
 r1 = search(
@@ -197,7 +209,7 @@ if r1:
     show_table(r1[0]["doc_id"], page=r1[0]["page"], section_hint="P&L")
 
 
-# ── CELL 6: Try your own query ───────────────────────────────
+# ── CELL 7: Try your own query ───────────────────────────────
 # Edit and run this cell as many times as you want.
 
 MY_QUERY   = "Nestle India revenue and profit growth FY24"
