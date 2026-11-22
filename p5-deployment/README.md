@@ -56,6 +56,33 @@ Langfuse credentials. The app loads this file automatically; existing environmen
 variables take priority. Restart Streamlit after changing configuration. `.env` is
 excluded from Git.
 
+## Connect your API
+
+For an OpenAI-compatible Chat Completions provider, set just these three values
+in `p5-deployment/.env` and restart Streamlit:
+
+```dotenv
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=your-provider-key
+LLM_MODEL=your-provider-model-id
+```
+
+Use your provider's base URL and a model available to your account. A nonempty
+`LLM_BASE_URL` automatically selects this connection, even if an older `.env`
+still says `LLM_TARGET=local`. No institute CA certificate or Qwen-specific
+thinking flags are sent. HTTPS verification stays enabled. Langfuse, retries,
+the model-call cache, and final-response caching continue to work.
+
+The provider/model must support Chat Completions. JSON mode is enabled by default;
+set `LLM_JSON_MODE=false` if that server does not support `response_format`.
+P2 still validates the returned JSON and applies its repair loop. This does not
+claim native compatibility with every vendor's distinct API protocol.
+
+Leave `LLM_BASE_URL` blank to retain `LLM_TARGET=local` (Ollama) or `LLM_TARGET=api`
+(institute endpoint and certificate). `LLM_TLS_CA_CERT` is an optional custom CA
+for a generic endpoint, independent of the institute's `LLM_CA_CERT`.
+The API connection does not replace P3's required parsed corpus/index files.
+
 ## Langfuse tracing
 
 The app uses Langfuse Python SDK 5.2.0 (for Langfuse Cloud / platform v4).
@@ -190,6 +217,7 @@ public deployment across sessions or servers.
 - `response_cache.py` — exact cache keys, persistent responses, expiry and clearing
 - `agent_bridge.py` — latest P4 runner adapter, response normalization and usage collection
 - `p4_loader.py` — isolated imports of the received flat P2 source
+- `api_connection.py` — common API configuration and OpenAI-compatible transport
 - `Dockerfile` — Python 3.11 image with a non-root user and health check
 - `docker-compose.yml` — app service available locally on port 8501
 - `../.dockerignore` — excludes credentials and generated data from the build context

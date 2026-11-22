@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from p4_loader import fingerprint, load_p2, load_runtime
 from response_cache import ChatResponse
 from tracing import get_tracing_client, trace_step, update_observation
+from api_connection import connection, compatible_client
 
 ROOT = Path(__file__).resolve().parents[1]
 P4_ROOT = ROOT / "p4-agent"
@@ -37,10 +38,7 @@ def missing_setup():
     for name in ("agents.py","llm_client.py","schemas.py","config.py","json_utils.py"):
         if not (p2_path()/name).is_file(): missing.append("P2: " + name)
     if not (P4_ROOT/"integration/runtime.py").is_file(): missing.append("P4 integration/runtime.py")
-    if os.getenv("LLM_TARGET", "local") == "api":
-        missing += [name for name in ("LLM_API_BASE_URL","LLM_API_KEY","LLM_CA_CERT") if not os.getenv(name)]
-        cert = os.getenv("LLM_CA_CERT")
-        if cert and not Path(cert).expanduser().is_file(): missing.append("valid LLM_CA_CERT file")
+    missing += connection().missing()
     return missing
 
 
@@ -51,20 +49,20 @@ def configuration():
     corpus = []
     for path in (rag_path()/"retrieve.py",rag_path()/"index/bm25.pkl",rag_path()/"index/faiss.index",rag_path()/"index/chunk_ids.json",rag_path()/"parsed/all_chunks.jsonl"):
         corpus.append((str(path),path.stat().st_size,path.stat().st_mtime_ns) if path.exists() else (str(path),None))
-    target = os.getenv("LLM_TARGET","local")
-    if target not in ('api','local'): raise ValueError("LLM_TARGET must be local or api")
-    endpoint = os.getenv("LLM_API_BASE_URL","") if target=='api' else os.getenv("LLM_LOCAL_BASE_URL","http://localhost:11434/v1")
-    code = [P4_ROOT/"integration/runtime.py",Path(__file__),Path(__file__).with_name("p4_loader.py")]
+    settings = connection()
+    target,endpoint = settings.mode,settings.base_url
+    code = [P4_ROOT/"integration/runtime.py",Path(__file__),Path(__file__).with_name("p4_loader.py"),Path(__file__).with_name('api_connection.py')]
     code += sorted((P4_ROOT/"p4").rglob("*.py"))
     pipeline = hashlib.sha256(b"".join(p.read_bytes() for p in code) + fingerprint(p2_path()).encode()).hexdigest()[:16]
     budget = int(os.getenv("AGENT_TOKEN_BUDGET","6000"))
     if budget < 1: raise ValueError("AGENT_TOKEN_BUDGET must be positive")
     return {"backend":"agent","provider":target,
-        "model":os.getenv("LLM_MODEL","Qwen/Qwen3-8B") if target=='api' else os.getenv("LLM_LOCAL_MODEL","qwen3:8b"),
+        "model":settings.model,
         "endpoint_fingerprint":hashlib.sha256(endpoint.encode()).hexdigest()[:16],
         "prompt_version":f"{config.PROMPT_VERSION}:{prompt_hash}","pipeline_version":pipeline,
         "corpus_version":hashlib.sha256(json.dumps(corpus).encode()).hexdigest()[:16],
-        "generation":config.AGENT_SETTINGS,"token_budget":budget,"p4_entrypoint":"integration.runtime.run_query"}
+        "generation":config.AGENT_SETTINGS,"json_mode":settings.json_mode,
+        "token_budget":budget,"p4_entrypoint":"integration.runtime.run_query"}
 
 
 @lru_cache(maxsize=2)
@@ -115,8 +113,13 @@ def _make_client(client_module):
         from langfuse.openai import OpenAI
     else:
         from openai import OpenAI
-    client_module.OpenAI=OpenAI
-    client=client_module.LLMClient(env_file=None)
+    settings=connection()
+    if settings.mode=='compatible':
+        client=compatible_client(client_module,OpenAI,settings)
+    else:
+        client_module.OpenAI=OpenAI
+        client=client_module.LLMClient(env_file=None)
+        client.model=settings.model
     original_log=client._log
     def safe_log(tag,res,*,status,attempts,error=''):
         return original_log(tag,res,status=status,attempts=attempts,error='Request failed' if error else '')

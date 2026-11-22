@@ -22,6 +22,7 @@ COPY --chown=appuser:appuser p4-agent/p4 /app/p4-agent/p4
 COPY --chown=appuser:appuser p4-agent/integration/runtime.py /app/p4-agent/integration/runtime.py
 COPY --chown=appuser:appuser p4-agent/integration/p2_agents /app/p4-agent/integration/p2_agents
 COPY --chown=appuser:appuser p5-deployment/p4_loader.py /app/p5-deployment/p4_loader.py
+COPY --chown=appuser:appuser p5-deployment/api_connection.py /app/p5-deployment/api_connection.py
 COPY --chown=appuser:appuser p3-retrieval/retrieve.py /app/p3-retrieval/retrieve.py
 
 USER appuser
