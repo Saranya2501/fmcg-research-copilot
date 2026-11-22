@@ -52,20 +52,33 @@ def update_observation(observation, **fields):
             logger.warning("Langfuse observation update failed.")
 
 
+def trace_identity(observation) -> tuple[str | None, str | None]:
+    if observation is None:
+        return None, None
+    try:
+        trace_id = observation.trace_id
+        client = get_tracing_client()
+        return trace_id, client.get_trace_url(trace_id=trace_id) if client else None
+    except Exception:
+        logger.warning("Langfuse trace link unavailable.")
+        return getattr(observation, "trace_id", None), None
+
+
 @contextmanager
-def trace_step(name: str, *, question: str, conversation_id: str):
+def trace_step(name: str, *, question: str, conversation_id: str, metadata: dict | None = None):
     client = get_tracing_client()
     if client is None:
         yield None
         return
     stack = ExitStack()
     try:
+        details = {"mode": "preview", "agent_connected": False, **(metadata or {})}
         stack.enter_context(propagate_attributes(
-            session_id=conversation_id, tags=["fmcg-copilot", "preview"],
+            session_id=conversation_id, tags=["fmcg-copilot", details["mode"]],
         ))
         observation = stack.enter_context(client.start_as_current_observation(
             name=name, as_type="span", input=question,
-            metadata={"mode": "preview", "agent_connected": False},
+            metadata=details,
         ))
     except Exception:
         stack.close()

@@ -14,6 +14,7 @@ RUN pip install -r /app/p5-deployment/requirements.txt \
 
 COPY --chown=appuser:appuser p5-deployment/app.py /app/p5-deployment/app.py
 COPY --chown=appuser:appuser p5-deployment/tracing.py /app/p5-deployment/tracing.py
+COPY --chown=appuser:appuser p5-deployment/response_cache.py /app/p5-deployment/response_cache.py
 
 USER appuser
 EXPOSE 8501

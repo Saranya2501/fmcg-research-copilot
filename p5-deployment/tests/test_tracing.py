@@ -13,6 +13,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 import app
 import tracing
+from response_cache import ChatResponse
 
 
 class TracingTests(unittest.TestCase):
@@ -80,6 +81,27 @@ class TracingTests(unittest.TestCase):
         span = self.exporter.get_finished_spans()[0]
         self.assertIn("ERROR", str(dict(span.attributes)))
         self.assertNotIn("secret-error-value", str(span.events))
+
+    def test_cached_turn_has_new_trace_link_and_hit_metadata(self):
+        config = {"backend": "test", "model": "test", "corpus_version": "v1"}
+        response = ChatResponse("Answer", [{"doc_id": "test", "page": 1}], cacheable=True)
+        with patch.object(tracing, "get_tracing_client", return_value=self.client), \
+             patch.object(self.client, "get_trace_url", side_effect=lambda trace_id: f"https://example.test/traces/{trace_id}"), \
+             patch.object(app, "response_config", return_value=config), \
+             patch.object(app, "generate_response", return_value=response) as generate, \
+             patch.dict(os.environ, {"CHAT_CACHE_ENABLED": "true"}):
+            first, second = app.create_conversation(), app.create_conversation()
+            app.process_chat_turn("same question", first)
+            app.process_chat_turn("same question", second)
+        self.client.flush()
+        a, b = app.load_messages(first)[-1], app.load_messages(second)[-1]
+        self.assertEqual(generate.call_count, 1)
+        self.assertNotEqual(a["trace_id"], b["trace_id"])
+        self.assertNotEqual(a["trace_url"], b["trace_url"])
+        self.assertEqual(b["cache_status"], "hit")
+        roots = [s for s in self.exporter.get_finished_spans() if s.name == "process-chat-turn"]
+        self.assertEqual(len(roots), 2)
+        self.assertIn('true', str(roots[-1].attributes.get('langfuse.observation.metadata.cache_hit')))
 
 
 if __name__ == "__main__":

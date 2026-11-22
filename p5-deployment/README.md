@@ -86,6 +86,43 @@ Run the offline tracing checks:
 .venv/bin/python -m unittest discover -s p5-deployment/tests -v
 ```
 
+## Response cache and answer trace links
+
+Each new assistant message saves its Langfuse trace ID and URL, cache status,
+latency in milliseconds, and citation payload alongside its answer. The **View trace**
+button remains available when reopening a saved conversation. Existing history is
+migrated automatically without deleting messages; older answers without a recorded
+trace do not get invented links. Tracing can still be disabled independently.
+
+Exact responses are cached in a `response_cache` table in the same SQLite database.
+`CHAT_CACHE_ENABLED=true` enables lookup and `CHAT_CACHE_TTL_SECONDS=3600` gives
+entries a one-hour lifetime. Expired entries are removed on lookup or subsequent
+writes. Disable caching with `CHAT_CACHE_ENABLED=false`, or pass
+`bypass_cache=True` to `process_chat_turn()` for scored evaluation runs (no reads or writes).
+
+Keys include the exact question (outer whitespace removed), prior message roles,
+content and citations, filters, provider/model, generation settings, prompt version,
+corpus version, and pipeline version. Timestamps and conversation IDs do not change
+answers, so they are excluded. Identical standalone requests can share a cached
+answer; a follow-up with different history cannot. This cache follows the app's
+existing single-user deployment model and must be partitioned by authenticated
+owner/tenant before a multi-user deployment.
+
+Every accepted turn starts a fresh trace, including cache hits; a hit does not reuse
+the original trace link or create a generation observation. Trace metadata includes
+`cache_hit`, `cache_status`, `latency_ms`, and the explicit response configuration.
+Cached answers retain their citations and show a small Cached response label.
+Cache read/write failures fall back to normal response processing.
+
+The current **preview adapter bypasses caching completely**. Failed, blank, and
+non-cacheable results are never stored. `generate_response()` is the P4 integration
+point: return `ChatResponse(answer=..., citations=[...], cacheable=True)` only for
+successful eligible answers, switch `response_config()['backend']` to `agent`, and
+supply the actual model/generation settings. Keep `CHAT_PROMPT_VERSION`,
+`CHAT_CORPUS_VERSION` and `CHAT_PIPELINE_VERSION` in sync with changed data/code
+to invalidate old responses. Changing version settings requires a restart.
+The cache is tested using a synthetic response adapter until P4 is available.
+
 ## Rate limit
 
 The chat accepts 5 messages per rolling 60 seconds per Streamlit session. Rejected
@@ -107,6 +144,7 @@ public deployment across sessions or servers.
 - `app.py` — Streamlit chat interface with session history and an explicit preview status
 - `requirements.txt` — dependencies for the current Streamlit starter
 - `tracing.py` — session-aware tracing, masking, and optional client setup
+- `response_cache.py` — exact cache keys, persistent responses, expiry and clearing
 - `Dockerfile` — Python 3.11 image with a non-root user and health check
 - `docker-compose.yml` — app service available locally on port 8501
 - `../.dockerignore` — excludes credentials and generated data from the build context
