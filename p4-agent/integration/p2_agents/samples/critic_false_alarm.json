@@ -1,0 +1,13 @@
+{
+  "verdict": "revise",
+  "issues": [
+    {
+      "claim": "Data for prior fiscal years is not available for A&P spend",
+      "quote": "Data for prior fiscal years is not available",
+      "correct": "Verify prior years",
+      "problem": "unsupported",
+      "fix_owner": "researcher",
+      "instruction": "Verify if the evidence supports the claim about prior fiscal years."
+    }
+  ]
+}

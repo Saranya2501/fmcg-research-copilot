@@ -1,0 +1,14 @@
+[
+  {
+    "subtask_id": "t1",
+    "company": "Example Foods",
+    "metric": "A&P as % of revenue",
+    "fiscal_year": "FY24",
+    "value": 8.57,
+    "unit": "%",
+    "chunk_ids": [
+      "c1"
+    ],
+    "inputs": "412.3 / 4,812.6 Rs crore"
+  }
+]

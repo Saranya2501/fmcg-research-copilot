@@ -1,0 +1,13 @@
+{
+  "verdict": "revise",
+  "issues": [
+    {
+      "claim": "about 9% of revenue",
+      "quote": "about 9% of revenue",
+      "correct": "8.57% of revenue (RESULTS)",
+      "problem": "wrong_number",
+      "fix_owner": "writer",
+      "instruction": "Use the calculated value 8.57% from RESULTS."
+    }
+  ]
+}

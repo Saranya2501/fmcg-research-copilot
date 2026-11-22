@@ -1,0 +1,86 @@
+{
+  "search_reports": {
+    "required": [
+      "query"
+    ],
+    "optional": [
+      "k",
+      "filters"
+    ],
+    "returns": [
+      "status",
+      "records"
+    ],
+    "owner": "P3 adapter called by P4"
+  },
+  "get_table": {
+    "required": [
+      "source_id"
+    ],
+    "optional": [
+      "page",
+      "table_id"
+    ],
+    "returns": [
+      "status",
+      "tables"
+    ],
+    "owner": "P3 adapter called by P4"
+  },
+  "calculator": {
+    "required": [
+      "expression"
+    ],
+    "returns": [
+      "expression",
+      "value"
+    ]
+  },
+  "unit_convert": {
+    "required": [
+      "value",
+      "from_unit"
+    ],
+    "optional": [
+      "to_unit"
+    ],
+    "returns": [
+      "input_value",
+      "from_unit",
+      "value",
+      "to_unit"
+    ]
+  },
+  "company_lookup": {
+    "required": [
+      "name"
+    ],
+    "returns": [
+      "status",
+      "canonical",
+      "aliases"
+    ]
+  },
+  "metric_lookup": {
+    "required": [
+      "metric"
+    ],
+    "returns": [
+      "status",
+      "canonical",
+      "synonyms"
+    ]
+  },
+  "generate_report": {
+    "required": [
+      "title",
+      "sections",
+      "approved"
+    ],
+    "returns": [
+      "status",
+      "path"
+    ],
+    "approval_required": true
+  }
+}

@@ -7,6 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY p5-deployment/requirements.txt /app/p5-deployment/requirements.txt
+COPY p4-agent/requirements.txt /app/p4-agent/requirements.txt
+COPY p3-retrieval/requirements.txt /app/p3-retrieval/requirements.txt
 RUN pip install -r /app/p5-deployment/requirements.txt \
     && useradd --create-home appuser \
     && mkdir -p /app/p5-deployment/data \
@@ -15,6 +17,12 @@ RUN pip install -r /app/p5-deployment/requirements.txt \
 COPY --chown=appuser:appuser p5-deployment/app.py /app/p5-deployment/app.py
 COPY --chown=appuser:appuser p5-deployment/tracing.py /app/p5-deployment/tracing.py
 COPY --chown=appuser:appuser p5-deployment/response_cache.py /app/p5-deployment/response_cache.py
+COPY --chown=appuser:appuser p5-deployment/agent_bridge.py /app/p5-deployment/agent_bridge.py
+COPY --chown=appuser:appuser p4-agent/p4 /app/p4-agent/p4
+COPY --chown=appuser:appuser p4-agent/integration/runtime.py /app/p4-agent/integration/runtime.py
+COPY --chown=appuser:appuser p4-agent/integration/p2_agents /app/p4-agent/integration/p2_agents
+COPY --chown=appuser:appuser p5-deployment/p4_loader.py /app/p5-deployment/p4_loader.py
+COPY --chown=appuser:appuser p3-retrieval/retrieve.py /app/p3-retrieval/retrieve.py
 
 USER appuser
 EXPOSE 8501

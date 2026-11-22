@@ -12,12 +12,20 @@ class ChatResponse:
     citations: list[dict] = field(default_factory=list)
     successful: bool = True
     cacheable: bool = False
+    status: str = "answered"
+    results: list[dict] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+    agent_context: dict = field(default_factory=dict)
+    usage: dict = field(default_factory=dict)
+    metrics: dict = field(default_factory=dict)
+    sections: list[dict] = field(default_factory=list)
 
 
 def cache_key(question: str, history: list[dict], filters: dict, config: dict) -> str:
     # Exclude timestamps, conversation IDs, and trace links, which don't affect answers.
     context = [{"role": m["role"], "content": m["content"],
-                "citations": m.get("citations", [])} for m in history]
+                "citations": m.get("citations", []),
+                "agent_context": m.get("response", {}).get("agent_context", {})} for m in history]
     payload = {"schema": 1, "question": question.strip(), "history": context,
                "filters": filters, "config": config}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False,

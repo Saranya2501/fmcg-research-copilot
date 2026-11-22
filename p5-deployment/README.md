@@ -12,9 +12,10 @@ Install and start Docker Desktop, then run from the repository root:
 docker compose -f p5-deployment/docker-compose.yml up --build -d
 ```
 
-Open http://localhost:8501. The app runs in preview mode until P4's agent is connected.
+Open http://localhost:8501. The app uses the latest supplied P4 Python query runner.
 It includes a chat input, conversation history for the current session, and a New chat
-button. It accepts questions but does not generate research answers yet.
+button. Research needs a configured model and the complete P3 source-data layout.
+Until those are available, the app shows setup information rather than fabricated answers.
 
 ## Saved conversations
 
@@ -63,10 +64,13 @@ Fill `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` in
 optional file into the container without baking credentials into the image.
 
 Each accepted chat turn creates a `process-chat-turn` trace, with a child
-`respond-preview` span. The conversation UUID becomes the Langfuse session ID,
+`generate-response` span. P4's gatekeeper, planner, query writer, analyst, writer
+and critic have nested agent observations; retrieval has a retriever observation.
+P2 uses Langfuse's native OpenAI wrapper for actual model generations and usage.
+The conversation UUID becomes the Langfuse session ID,
 grouping turns from reopened chats. Rate-limited messages and UI reruns do not
-create traces. Preview spans carry `mode=preview` and `agent_connected=false`;
-there are no model names, token counts, or invented generation observations.
+create traces. The optional preview backend remains available with
+`CHAT_BACKEND=preview` and does not invent model usage or cache preview replies.
 
 The client is reused across Streamlit reruns and exports in the background.
 Missing credentials or `LANGFUSE_TRACING_ENABLED=false` disable tracing. Trace
@@ -84,6 +88,8 @@ Run the offline tracing checks:
 
 ```bash
 .venv/bin/python -m unittest discover -s p5-deployment/tests -v
+PYTHONPATH=p4-agent .venv/bin/python -m pytest p4-agent/tests p4-agent/integration/tests -q
+.venv/bin/python p4-agent/integration/p2_agents/tests/test_agents.py
 ```
 
 ## Response cache and answer trace links
@@ -114,14 +120,51 @@ the original trace link or create a generation observation. Trace metadata inclu
 Cached answers retain their citations and show a small Cached response label.
 Cache read/write failures fall back to normal response processing.
 
-The current **preview adapter bypasses caching completely**. Failed, blank, and
-non-cacheable results are never stored. `generate_response()` is the P4 integration
-point: return `ChatResponse(answer=..., citations=[...], cacheable=True)` only for
-successful eligible answers, switch `response_config()['backend']` to `agent`, and
-supply the actual model/generation settings. Keep `CHAT_PROMPT_VERSION`,
-`CHAT_CORPUS_VERSION` and `CHAT_PIPELINE_VERSION` in sync with changed data/code
-to invalidate old responses. Changing version settings requires a restart.
-The cache is tested using a synthetic response adapter until P4 is available.
+The optional **preview adapter bypasses caching completely**. Failed, blank, and
+non-cacheable results are never stored. `generate_response()` delegates to the P4
+bridge, which marks only complete, cited, critic-approved answers as cacheable.
+Cache keys fingerprint the actual P2 prompt/settings files, P4 and bridge code,
+model endpoint, and P3 file sizes/modification times. Replace data atomically and
+restart after changing packages or model configuration.
+The cache is tested through the supplied P4 runner with scripted model replies and retrieval.
+
+## Latest P4 integration
+
+`agent_bridge.py` calls the entry point documented by the new P4 package:
+`p4-agent/integration/runtime.py::run_query(question, p2_path, p3_path, llm=...)`.
+It does not invoke the old P4 graph rewrite. The supplied P4/P2 source is preserved;
+the adapter loads P2 into an isolated import namespace, avoiding collisions with
+flat module names such as `config`, `schemas` and `agents`.
+
+P2 defaults to `p4-agent/integration/p2_agents`; override with `P2_PACKAGE_PATH`.
+P3 defaults to this repository's `p3-retrieval`; override with `P3_RAG_PATH`.
+It must contain `retrieve.py`, `index/bm25.pkl`, `index/faiss.index`,
+`index/chunk_ids.json`, and `parsed/all_chunks.jsonl`. The supplied index files
+have been copied into the default index directory. A chunk sample is not a
+replacement for the full parsed corpus.
+
+The adapter injects the saved conversation history and last company/metric/year
+context into P2's gatekeeper, then saves the new resolved context with the answer.
+It normalizes P4's `refused` and `partial_validation` variants to the P5 response
+contract. Partial, unsupported, missing-evidence or invalid-citation responses
+are not cached. Citation document/page values come from retrieved evidence.
+Actual model-call usage, cache hits and JSON attempts/repairs are saved per turn;
+scored runs bypass both the final-response cache and P2's model cache.
+The runtime's calculator call is wrapped in memory for tracing and tool counting;
+its source file is unchanged. The adapter bounds expression length/complexity and
+allows the prompt contract's arithmetic rather than unbounded exponentiation.
+
+P5 enforces a configurable cumulative token allowance (`AGENT_TOKEN_BUDGET`,
+default 6000) across model calls, including JSON repairs. The input estimate is
+approximate; actual reported usage is checked after each call and further work
+stops when the budget is exhausted. Cache hits have zero new billed token usage.
+Model/client errors are shown as a controlled partial response.
+
+The supplied `run_query` helper is a single-answer path. It does not expose the
+separate LangGraph workflow, brief export, or critic revision loop; P5 does not
+claim those are integrated. Gold-set scoring and full live retrieval verification
+remain separate work. Received notebook/archive/reference files are not runtime
+dependencies and are not executed by the application.
 
 ## Rate limit
 
@@ -145,17 +188,15 @@ public deployment across sessions or servers.
 - `requirements.txt` — dependencies for the current Streamlit starter
 - `tracing.py` — session-aware tracing, masking, and optional client setup
 - `response_cache.py` — exact cache keys, persistent responses, expiry and clearing
+- `agent_bridge.py` — latest P4 runner adapter, response normalization and usage collection
+- `p4_loader.py` — isolated imports of the received flat P2 source
 - `Dockerfile` — Python 3.11 image with a non-root user and health check
 - `docker-compose.yml` — app service available locally on port 8501
 - `../.dockerignore` — excludes credentials and generated data from the build context
 
 ## Next integration steps
 
-Connect P4's agent to the chat input, then render its answer and citations.
-Add P2/P4 dependencies and source files to the image when that interface is ready.
-Retrieval will need the three P3 index files plus `parsed/all_chunks.jsonl`, supplied
-as mounted data rather than baked into the image. When P4/P2 arrive, replace the
-preview response with the agent and use Langfuse's framework integration inside
-the turn trace to capture each model call, its usage, and retrieval/tool steps.
-Evaluation with trace output remains to be implemented. Tracing is optional and
-the preview chat can run without API keys.
+Supply the full P3 parsed corpus and choose a configured Ollama or institute API
+target. Docker mounts the P3 index and parsed corpus read-only; configure certificate
+paths inside the container and use `host.docker.internal` for Ollama on a Mac host.
+Then verify real research answers before running the approved gold evaluation set.

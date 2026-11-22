@@ -1,0 +1,14 @@
+{
+  "use_case": "UC2",
+  "in_scope": true,
+  "companies": [
+    "Example Foods"
+  ],
+  "metrics": [
+    "A&P"
+  ],
+  "fiscal_years": [
+    "2023-24"
+  ],
+  "resolved_question": "A&P share FY24"
+}

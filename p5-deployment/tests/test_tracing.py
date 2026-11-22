@@ -28,7 +28,7 @@ class TracingTests(unittest.TestCase):
 
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
-        self.env = patch.dict(os.environ, {"CHAT_HISTORY_DB": self.folder.name + "/history.sqlite3"})
+        self.env = patch.dict(os.environ, {"CHAT_HISTORY_DB": self.folder.name + "/history.sqlite3", "CHAT_BACKEND":"preview"})
         self.env.start()
         self.exporter.clear()
 

@@ -20,6 +20,7 @@ class ResponseCacheTests(unittest.TestCase):
         self.settings = patch.dict(os.environ, {
             "CHAT_HISTORY_DB": self.path, "CHAT_CACHE_ENABLED": "true",
             "CHAT_CACHE_TTL_SECONDS": "3600",
+            "CHAT_BACKEND": "preview",
         })
         self.settings.start()
         self.offline = patch.object(tracing, "get_tracing_client", return_value=None)

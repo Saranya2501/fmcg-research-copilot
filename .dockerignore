@@ -11,3 +11,7 @@ p3-retrieval/index
 p3-retrieval/parsed
 p5-deployment/data
 .DS_Store
+**/index_bundle.zip
+p4-agent/p3_retrieval/index
+p4-agent/p3_retrieval/parsed
+**/.pytest_cache

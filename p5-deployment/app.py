@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from dataclasses import asdict, replace
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -38,7 +39,8 @@ def history_db():
             columns = {row[1] for row in connection.execute("PRAGMA table_info(messages)")}
             for name, sql_type in (("trace_id", "TEXT"), ("trace_url", "TEXT"),
                                    ("citations", "TEXT NOT NULL DEFAULT '[]'"),
-                                   ("cache_status", "TEXT"), ("latency_ms", "REAL")):
+                                   ("cache_status", "TEXT"), ("latency_ms", "REAL"),
+                                   ("response_json", "TEXT NOT NULL DEFAULT '{}'")):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE messages ADD COLUMN {name} {sql_type}")
             response_cache.initialize(connection)
@@ -60,7 +62,7 @@ def conversation_title(content: str) -> str:
 
 
 def save_message(conversation_id: str, role: str, content: str, *, trace_id=None,
-                 trace_url=None, citations=None, cache_status=None, latency_ms=None) -> None:
+                 trace_url=None, citations=None, cache_status=None, latency_ms=None, response=None) -> None:
     with history_db() as db:
         if role == "user":
             db.execute(
@@ -68,19 +70,20 @@ def save_message(conversation_id: str, role: str, content: str, *, trace_id=None
                 (conversation_title(content), conversation_id, conversation_id),
             )
         db.execute("""INSERT INTO messages
-                   (conversation_id, role, content, created_at, trace_id, trace_url, citations, cache_status, latency_ms)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (conversation_id, role, content, created_at, trace_id, trace_url, citations, cache_status, latency_ms, response_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                    (conversation_id, role, content, datetime.now(timezone.utc).isoformat(),
-                    trace_id, trace_url, json.dumps(citations or []), cache_status, latency_ms))
+                    trace_id, trace_url, json.dumps(citations or []), cache_status, latency_ms,json.dumps(response or {})))
 
 
 def load_messages(conversation_id: str) -> list[dict]:
     with history_db() as db:
         messages = [dict(row) for row in db.execute(
-            "SELECT role, content, created_at, trace_id, trace_url, citations, cache_status, latency_ms FROM messages WHERE conversation_id = ? ORDER BY id", (conversation_id,)
+            "SELECT id, role, content, created_at, trace_id, trace_url, citations, cache_status, latency_ms, response_json FROM messages WHERE conversation_id = ? ORDER BY id", (conversation_id,)
         )]
         for message in messages:
             message["citations"] = json.loads(message["citations"])
+            message["response"] = json.loads(message.pop("response_json"))
         return messages
 
 
@@ -100,6 +103,12 @@ def positive_setting(name: str, default: int) -> int:
 
 
 def response_config() -> dict:
+    backend = os.getenv("CHAT_BACKEND", "agent")
+    if backend == "agent":
+        from agent_bridge import configuration
+        return configuration()
+    if backend != "preview":
+        raise ValueError("CHAT_BACKEND must be agent or preview")
     generation = json.loads(os.getenv("CHAT_GENERATION_CONFIG", "{}"))
     if not isinstance(generation, dict):
         raise ValueError("CHAT_GENERATION_CONFIG must be a JSON object")
@@ -119,7 +128,9 @@ def response_config() -> dict:
 
 
 def generate_response(question: str, history: list[dict], filters: dict, config: dict) -> ChatResponse:
-    # P4 adapter belongs here; successful real answers must explicitly opt in to caching.
+    if config["backend"] == "agent":
+        from agent_bridge import run_agent
+        return run_agent(question, history, filters, config)
     return ChatResponse(
         answer="I'm ready to help with your research. This is a preview of the chat; "
                "the research agent still needs to be connected before I can look up "
@@ -133,6 +144,7 @@ def process_chat_turn(question: str, conversation_id: str, *, filters: dict | No
     started = time.perf_counter()
     history = load_messages(conversation_id)
     config, filters = response_config(), filters or {}
+    config = {**config, "bypass_model_cache": bypass_cache}
     ttl = positive_setting("CHAT_CACHE_TTL_SECONDS", 3600)
     enabled = os.getenv("CHAT_CACHE_ENABLED", "true").lower() == "true"
     status = ("bypass_preview" if config["backend"] == "preview" else
@@ -149,6 +161,9 @@ def process_chat_turn(question: str, conversation_id: str, *, filters: dict | No
                 with history_db() as db:
                     result = response_cache.lookup(db, key)
                 status = "hit" if result else "miss"
+                if result is not None:
+                    result = replace(result, usage={"prompt_tokens":0,"completion_tokens":0,"total_tokens":0},
+                                     metrics={"response_cache_hit":True,"llm_calls":0,"tool_calls":0})
             except sqlite3.Error:
                 status = "error"
                 logger.warning("Response cache read failed; generating an answer.")
@@ -165,11 +180,14 @@ def process_chat_turn(question: str, conversation_id: str, *, filters: dict | No
                     logger.warning("Response cache write failed; answer will still be returned.")
         latency = round((time.perf_counter() - started) * 1000, 2)
         update_observation(turn, output=result.answer, metadata={**details, "cache_status": status,
-                           "cache_hit": status == "hit", "latency_ms": latency},
+                           "cache_hit": status == "hit", "latency_ms": latency,
+                           "agent_connected":config["backend"]=="agent" and not result.metrics.get("setup_required",False),
+                           "usage":result.usage,"metrics":result.metrics,"status":result.status},
                            **({"level": "ERROR", "status_message": "Response unsuccessful"} if not result.successful else {}))
         trace_id, trace_url = trace_identity(turn)
         save_message(conversation_id, "assistant", result.answer, trace_id=trace_id,
-                     trace_url=trace_url, citations=result.citations, cache_status=status, latency_ms=latency)
+                     trace_url=trace_url, citations=result.citations, cache_status=status, latency_ms=latency,
+                     response=asdict(result))
     return result.answer
 
 
@@ -187,7 +205,7 @@ def main() -> None:
         window = positive_setting("CHAT_RATE_WINDOW_SECONDS", 60)
         positive_setting("CHAT_CACHE_TTL_SECONDS", 3600)
         response_config()
-    except ValueError as exc:
+    except (ValueError, OSError, ImportError) as exc:
         st.error(f"Invalid chat configuration: {exc}")
         st.stop()
 
@@ -216,7 +234,17 @@ def main() -> None:
     st.session_state.messages = load_messages(st.session_state.active_conversation_id)
 
     st.title("FMCG Research Copilot")
-    st.caption("Preview · Research agent not yet connected")
+    if response_config()["backend"] == "agent":
+        from agent_bridge import missing_setup
+        missing = missing_setup()
+        st.caption("Research agent · Answers grounded in company filings")
+        if missing:
+            st.warning("Research setup is incomplete. Source data or model configuration is still needed.")
+            with st.expander("Setup details"):
+                for item in missing:
+                    st.write(item)
+    else:
+        st.caption("Preview · Research agent not connected")
 
     if not st.session_state.messages:
         with st.chat_message("assistant"):
@@ -229,6 +257,12 @@ def main() -> None:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message["role"] == "assistant":
+                if message.get("citations"):
+                    with st.expander("Sources"):
+                        for citation in message["citations"]:
+                            st.write(f"{citation.get('company','')} · {citation.get('document',citation.get('doc',''))} · p. {citation.get('page','?')}")
+                if message.get("response",{}).get("limitations"):
+                    st.caption("Limitations: " + "; ".join(message["response"]["limitations"]))
                 if message.get("cache_status") == "hit":
                     st.caption("Cached response")
                 if message.get("trace_url"):

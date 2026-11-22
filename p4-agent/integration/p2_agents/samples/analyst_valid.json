@@ -1,0 +1,29 @@
+{
+  "values": [
+    {
+      "label": "advertisement and sales promotion",
+      "value": 412.3,
+      "unit": "Rs crore",
+      "fiscal_year": "FY24",
+      "chunk_id": "c1",
+      "quote": "Advertisement and sales promotion 412.3"
+    },
+    {
+      "label": "revenue from operations",
+      "value": 4812.6,
+      "unit": "Rs crore",
+      "fiscal_year": "FY24",
+      "chunk_id": "c1",
+      "quote": "Revenue from operations 4,812.6"
+    }
+  ],
+  "calculation": {
+    "expression": "a_p / revenue * 100",
+    "variables": {
+      "a_p": "advertisement and sales promotion",
+      "revenue": "revenue from operations"
+    },
+    "result_unit": "%"
+  },
+  "missing": []
+}

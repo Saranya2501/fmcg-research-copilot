@@ -1,0 +1,14 @@
+{
+  "answer": "Example Foods spent 8.57% of its FY24 revenue from operations on advertisement and sales promotion [c1].",
+  "value": 8.57,
+  "unit": "%",
+  "fiscal_year": "FY24",
+  "ranking": null,
+  "citations": [
+    {
+      "chunk_id": "c1"
+    }
+  ],
+  "refused": false,
+  "refusal_reason": null
+}

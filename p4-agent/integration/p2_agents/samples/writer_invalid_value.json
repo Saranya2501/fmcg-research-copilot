@@ -1,0 +1,16 @@
+{
+  "answer": "Example Foods spent about 9% of revenue on A&P [c1].",
+  "value": 9.0,
+  "unit": "%",
+  "fiscal_year": "FY24",
+  "ranking": null,
+  "citations": [
+    {
+      "chunk_id": "c1",
+      "doc": "ExampleFoods_AR_FY24.pdf",
+      "page": 88
+    }
+  ],
+  "refused": false,
+  "refusal_reason": null
+}

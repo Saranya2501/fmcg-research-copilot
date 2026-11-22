@@ -1,0 +1,16 @@
+{
+  "use_case": "UC2",
+  "in_scope": true,
+  "refusal_reason": null,
+  "refusal_message": null,
+  "companies": [
+    "Example Foods"
+  ],
+  "metrics": [
+    "A&P spend as % of revenue"
+  ],
+  "fiscal_years": [
+    "FY24"
+  ],
+  "resolved_question": "What was Example Foods' A&P spend as % of revenue in FY24?"
+}

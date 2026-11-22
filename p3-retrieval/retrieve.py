@@ -56,7 +56,7 @@ def _embed_via_api(texts: list[str]) -> np.ndarray:
     cert_path = Path(os.getenv("CACERT_PATH", "certs/vm02-ca.crt"))
     if not cert_path.is_absolute():
         cert_path = RAG_DIR / cert_path
-    verify: object = str(cert_path) if cert_path.exists() else False
+    verify: object = str(cert_path) if cert_path.exists() else True
 
     all_embeddings: list[list[float]] = []
     for i in range(0, len(texts), 16):

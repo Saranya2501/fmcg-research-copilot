@@ -1,0 +1,14 @@
+{
+  "values": [
+    {
+      "label": "revenue from operations",
+      "value": 4900.0,
+      "unit": "Rs crore",
+      "fiscal_year": "FY24",
+      "chunk_id": "c1",
+      "quote": "Revenue from operations 4,900.0"
+    }
+  ],
+  "calculation": null,
+  "missing": []
+}

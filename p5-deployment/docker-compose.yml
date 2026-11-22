@@ -11,6 +11,13 @@ services:
         required: false
     volumes:
       - chat-history:/app/p5-deployment/data
+      - ../p3-retrieval/index:/app/p3-retrieval/index:ro
+      - ../p3-retrieval/parsed:/app/p3-retrieval/parsed:ro
+      - ./certs:/app/p5-deployment/certs:ro
+    environment:
+      LLM_LOG_PATH: /app/p5-deployment/data/logs/llm_calls.jsonl
+      LLM_CACHE_PATH: /app/p5-deployment/data/llm_cache.sqlite
+      LLM_LOCK_PATH: /app/p5-deployment/data/llm_api.lock
 
 volumes:
   chat-history:

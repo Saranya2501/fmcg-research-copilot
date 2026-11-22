@@ -65,7 +65,7 @@ def trace_identity(observation) -> tuple[str | None, str | None]:
 
 
 @contextmanager
-def trace_step(name: str, *, question: str, conversation_id: str, metadata: dict | None = None):
+def trace_step(name: str, *, question, conversation_id: str | None, metadata: dict | None = None, as_type="span"):
     client = get_tracing_client()
     if client is None:
         yield None
@@ -77,7 +77,7 @@ def trace_step(name: str, *, question: str, conversation_id: str, metadata: dict
             session_id=conversation_id, tags=["fmcg-copilot", details["mode"]],
         ))
         observation = stack.enter_context(client.start_as_current_observation(
-            name=name, as_type="span", input=question,
+            name=name, as_type=as_type, input=question,
             metadata=details,
         ))
     except Exception:
