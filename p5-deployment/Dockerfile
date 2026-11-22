@@ -8,7 +8,7 @@ WORKDIR /app
 
 COPY p5-deployment/requirements.txt /app/p5-deployment/requirements.txt
 COPY p4-agent/requirements.txt /app/p4-agent/requirements.txt
-COPY p3-retrieval/requirements.txt /app/p3-retrieval/requirements.txt
+COPY p4-agent/p3_retrieval/requirements.txt /app/p4-agent/p3_retrieval/requirements.txt
 RUN pip install -r /app/p5-deployment/requirements.txt \
     && useradd --create-home appuser \
     && mkdir -p /app/p5-deployment/data \
@@ -23,7 +23,7 @@ COPY --chown=appuser:appuser p4-agent/integration/runtime.py /app/p4-agent/integ
 COPY --chown=appuser:appuser p4-agent/integration/p2_agents /app/p4-agent/integration/p2_agents
 COPY --chown=appuser:appuser p5-deployment/p4_loader.py /app/p5-deployment/p4_loader.py
 COPY --chown=appuser:appuser p5-deployment/api_connection.py /app/p5-deployment/api_connection.py
-COPY --chown=appuser:appuser p3-retrieval/retrieve.py /app/p3-retrieval/retrieve.py
+COPY --chown=appuser:appuser p4-agent/p3_retrieval/retrieve.py /app/p4-agent/p3_retrieval/retrieve.py
 
 USER appuser
 EXPOSE 8501

@@ -27,7 +27,7 @@ def p2_path():
 
 
 def rag_path():
-    return Path(os.getenv("P3_RAG_PATH", str(ROOT/"p3-retrieval"))).expanduser().resolve()
+    return Path(os.getenv("P3_RAG_PATH") or str(P4_ROOT/"p3_retrieval")).expanduser().resolve()
 
 
 def missing_setup():

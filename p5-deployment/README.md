@@ -164,10 +164,12 @@ the adapter loads P2 into an isolated import namespace, avoiding collisions with
 flat module names such as `config`, `schemas` and `agents`.
 
 P2 defaults to `p4-agent/integration/p2_agents`; override with `P2_PACKAGE_PATH`.
-P3 defaults to this repository's `p3-retrieval`; override with `P3_RAG_PATH`.
+Retrieval defaults to `p4-agent/p3_retrieval` inside the supplied P4 package;
+override with `P3_RAG_PATH`. The separate top-level `p3-retrieval` folder is not
+used by P5's default configuration, dependencies, or container.
 It must contain `retrieve.py`, `index/bm25.pkl`, `index/faiss.index`,
 `index/chunk_ids.json`, and `parsed/all_chunks.jsonl`. The supplied index files
-have been copied into the default index directory. A chunk sample is not a
+have been extracted from `index_bundle.zip` into P4's `index/`. A chunk sample is not a
 replacement for the full parsed corpus.
 
 The adapter injects the saved conversation history and last company/metric/year
