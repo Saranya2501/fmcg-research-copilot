@@ -34,6 +34,8 @@ def history_db():
         with connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute("CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL)")
+            if 'mode' not in {row[1] for row in connection.execute('PRAGMA table_info(conversations)')}:
+                connection.execute("ALTER TABLE conversations ADD COLUMN mode TEXT NOT NULL DEFAULT 'research'")
             connection.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL)")
             connection.execute("CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id, id)")
             columns = {row[1] for row in connection.execute("PRAGMA table_info(messages)")}
@@ -49,10 +51,13 @@ def history_db():
         connection.close()
 
 
-def create_conversation() -> str:
+def create_conversation(mode='research') -> str:
+    if mode not in ('research','chat'):
+        raise ValueError('Conversation mode must be research or chat')
     conversation_id = str(uuid4())
     with history_db() as db:
-        db.execute("INSERT INTO conversations VALUES (?, ?, ?)", (conversation_id, "New chat", datetime.now(timezone.utc).isoformat()))
+        db.execute("INSERT INTO conversations (id,title,created_at,mode) VALUES (?, ?, ?, ?)",
+                   (conversation_id, "New chat", datetime.now(timezone.utc).isoformat(),mode))
     return conversation_id
 
 
@@ -128,6 +133,9 @@ def response_config() -> dict:
 
 
 def generate_response(question: str, history: list[dict], filters: dict, config: dict) -> ChatResponse:
+    if config['backend']=='chat':
+        from agent_bridge import run_direct_chat
+        return run_direct_chat(question,history,config)
     if config["backend"] == "agent":
         from agent_bridge import run_agent
         return run_agent(question, history, filters, config)
@@ -140,10 +148,17 @@ def generate_response(question: str, history: list[dict], filters: dict, config:
 
 
 def process_chat_turn(question: str, conversation_id: str, *, filters: dict | None = None,
-                      bypass_cache: bool = False) -> str:
+                      bypass_cache: bool = False, mode='research') -> str:
     started = time.perf_counter()
     history = load_messages(conversation_id)
-    config, filters = response_config(), filters or {}
+    filters = filters or {}
+    if mode=='chat':
+        from agent_bridge import configuration
+        config=configuration(direct=True)
+    elif mode!='research':
+        raise ValueError('Chat mode must be research or chat')
+    else:
+        config=response_config()
     config = {**config, "bypass_model_cache": bypass_cache}
     ttl = positive_setting("CHAT_CACHE_TTL_SECONDS", 3600)
     enabled = os.getenv("CHAT_CACHE_ENABLED", "true").lower() == "true"
@@ -163,7 +178,8 @@ def process_chat_turn(question: str, conversation_id: str, *, filters: dict | No
                 status = "hit" if result else "miss"
                 if result is not None:
                     result = replace(result, usage={"prompt_tokens":0,"completion_tokens":0,"total_tokens":0},
-                                     metrics={"response_cache_hit":True,"llm_calls":0,"tool_calls":0})
+                                     metrics={"response_cache_hit":True,"llm_calls":0,"tool_calls":0,
+                                              'mode':config['backend'],'retrieval_used':config['backend']=='agent'})
             except sqlite3.Error:
                 status = "error"
                 logger.warning("Response cache read failed; generating an answer.")
@@ -182,6 +198,7 @@ def process_chat_turn(question: str, conversation_id: str, *, filters: dict | No
         update_observation(turn, output=result.answer, metadata={**details, "cache_status": status,
                            "cache_hit": status == "hit", "latency_ms": latency,
                            "agent_connected":config["backend"]=="agent" and not result.metrics.get("setup_required",False),
+                           "retrieval_enabled":config['backend']=='agent',
                            "usage":result.usage,"metrics":result.metrics,"status":result.status},
                            **({"level": "ERROR", "status_message": "Response unsuccessful"} if not result.successful else {}))
         trace_id, trace_url = trace_identity(turn)
@@ -189,6 +206,15 @@ def process_chat_turn(question: str, conversation_id: str, *, filters: dict | No
                      trace_url=trace_url, citations=result.citations, cache_status=status, latency_ms=latency,
                      response=asdict(result))
     return result.answer
+
+
+def start_mode_conversation():
+    st.session_state.active_conversation_id=create_conversation('chat' if st.session_state.direct_chat else 'research')
+
+
+def select_conversation(conversation_id,mode):
+    st.session_state.active_conversation_id=conversation_id
+    st.session_state.direct_chat=mode=='chat'
 
 
 def main() -> None:
@@ -200,11 +226,19 @@ def main() -> None:
             save_message(st.session_state.active_conversation_id, message["role"], message["content"])
     if "request_timestamps" not in st.session_state:
         st.session_state.request_timestamps = []
+    if 'direct_chat' not in st.session_state:
+        with history_db() as db:
+            selected=db.execute('SELECT mode FROM conversations WHERE id=?',(st.session_state.active_conversation_id,)).fetchone()
+        st.session_state.direct_chat=bool(selected and selected['mode']=='chat')
     try:
         limit = positive_setting("CHAT_RATE_LIMIT", 5)
         window = positive_setting("CHAT_RATE_WINDOW_SECONDS", 60)
         positive_setting("CHAT_CACHE_TTL_SECONDS", 3600)
-        response_config()
+        if st.session_state.direct_chat:
+            from agent_bridge import configuration
+            configuration(direct=True)
+        else:
+            response_config()
     except (ValueError, OSError, ImportError) as exc:
         st.error(f"Invalid chat configuration: {exc}")
         st.stop()
@@ -212,7 +246,9 @@ def main() -> None:
     with st.sidebar:
         st.subheader("📊 FMCG Copilot")
         if st.button("New chat", use_container_width=True):
-            st.session_state.active_conversation_id = create_conversation()
+            start_mode_conversation()
+        st.toggle('Chat with model',key='direct_chat',on_change=start_mode_conversation,
+                  help='Skip document retrieval and talk directly to your configured model.')
         with history_db() as db:
             conversations = [dict(row) for row in db.execute(
                 "SELECT c.*, (SELECT content FROM messages WHERE conversation_id = c.id AND role = 'user' ORDER BY id LIMIT 1) AS first_message FROM conversations c WHERE EXISTS (SELECT 1 FROM messages WHERE conversation_id = c.id AND role = 'user') ORDER BY created_at DESC"
@@ -222,19 +258,23 @@ def main() -> None:
             st.caption("Your conversations will appear here.")
         for conversation in conversations:
             title = conversation_title(conversation["first_message"]) if conversation["first_message"] else "New chat"
-            if st.button(
+            st.button(
                 title,
                 key=f"history_{conversation['id']}",
                 type="primary" if conversation["id"] == st.session_state.active_conversation_id else "secondary",
                 use_container_width=True,
-            ):
-                st.session_state.active_conversation_id = conversation["id"]
-                st.rerun()
+                on_click=select_conversation,args=(conversation['id'],conversation['mode']),
+            )
 
     st.session_state.messages = load_messages(st.session_state.active_conversation_id)
 
     st.title("FMCG Research Copilot")
-    if response_config()["backend"] == "agent":
+    if st.session_state.direct_chat:
+        from api_connection import connection
+        st.caption('Model chat · Document retrieval is off')
+        if connection().missing():
+            st.warning('Set up your API key, base URL and model ID to start chatting.')
+    elif response_config()["backend"] == "agent":
         from agent_bridge import missing_setup
         missing = missing_setup()
         st.caption("Research agent · Answers grounded in company filings")
@@ -249,14 +289,16 @@ def main() -> None:
     if not st.session_state.messages:
         with st.chat_message("assistant"):
             st.markdown(
-                "What would you like to research?\n\n"
-                "For example: What were HUL's advertising expenses in FY24?"
+                "What would you like to talk about?" if st.session_state.direct_chat else
+                "What would you like to research?\n\nFor example: What were HUL's advertising expenses in FY24?"
             )
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message["role"] == "assistant":
+                if message.get('response',{}).get('metrics',{}).get('mode')=='chat':
+                    st.caption('Model chat · No document retrieval')
                 if message.get("citations"):
                     with st.expander("Sources"):
                         for citation in message["citations"]:
@@ -268,7 +310,7 @@ def main() -> None:
                 if message.get("trace_url"):
                     st.link_button("View trace ↗", message["trace_url"])
 
-    question = st.chat_input("Ask about a company, financial year, or competitor…", max_chars=5000)
+    question = st.chat_input('Message your model…' if st.session_state.direct_chat else "Ask about a company, financial year, or competitor…", max_chars=5000)
     if question and question.strip():
         timestamps, retry_after = check_rate_limit(
             st.session_state.request_timestamps, time.monotonic(), limit, window
@@ -281,7 +323,8 @@ def main() -> None:
         with st.chat_message("user"):
             st.markdown(question)
 
-        reply = process_chat_turn(question, st.session_state.active_conversation_id)
+        reply = process_chat_turn(question, st.session_state.active_conversation_id,
+                                  mode='chat' if st.session_state.direct_chat else 'research')
         with st.chat_message("assistant"):
             st.markdown(reply)
         st.rerun()

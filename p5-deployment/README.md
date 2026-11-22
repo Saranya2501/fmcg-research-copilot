@@ -56,6 +56,20 @@ Langfuse credentials. The app loads this file automatically; existing environmen
 variables take priority. Restart Streamlit after changing configuration. `.env` is
 excluded from Git.
 
+## Chat without retrieval
+
+Turn on **Chat with model** in the sidebar to skip document retrieval and the P4
+research pipeline. This makes one conversational model call using your configured
+API and recent chat history. The parsed corpus and indexes are not checked or used
+in this mode. Replies are labelled as model chat and have no document citations.
+
+Switching modes starts a fresh conversation without deleting previous chats.
+Reopening a saved conversation restores its mode. Both modes retain session rate
+limits, persistent history, response caching, usage tracking and Langfuse trace
+links. Their cache keys are separate. Recent history is trimmed when necessary to
+fit the model client's token budget. Turning the switch off returns to research,
+which still requires the complete parsed corpus and indexes.
+
 ## Connect your API
 
 For an OpenAI-compatible Chat Completions provider, set just these three values

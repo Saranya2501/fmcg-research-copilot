@@ -42,26 +42,34 @@ def missing_setup():
     return missing
 
 
-def configuration():
+DIRECT_SYSTEM_PROMPT = (
+    "You are a helpful assistant. Answer using the conversation and your general knowledge. "
+    "Document retrieval is disabled in this mode. Do not claim to have read the application's "
+    "company filings or invent document/page citations. Say when you are unsure."
+)
+
+
+def configuration(*, direct=False):
     config = load_p2(p2_path())['config']
     prompts = p2_path()/"prompts"
-    prompt_hash = hashlib.sha256(b"".join(p.read_bytes() for p in sorted(prompts.glob("*.md")))).hexdigest()[:16]
+    prompt_hash = hashlib.sha256(DIRECT_SYSTEM_PROMPT.encode() if direct else b"".join(p.read_bytes() for p in sorted(prompts.glob("*.md")))).hexdigest()[:16]
     corpus = []
-    for path in (rag_path()/"retrieve.py",rag_path()/"index/bm25.pkl",rag_path()/"index/faiss.index",rag_path()/"index/chunk_ids.json",rag_path()/"parsed/all_chunks.jsonl"):
+    for path in (() if direct else (rag_path()/"retrieve.py",rag_path()/"index/bm25.pkl",rag_path()/"index/faiss.index",rag_path()/"index/chunk_ids.json",rag_path()/"parsed/all_chunks.jsonl")):
         corpus.append((str(path),path.stat().st_size,path.stat().st_mtime_ns) if path.exists() else (str(path),None))
     settings = connection()
     target,endpoint = settings.mode,settings.base_url
-    code = [P4_ROOT/"integration/runtime.py",Path(__file__),Path(__file__).with_name("p4_loader.py"),Path(__file__).with_name('api_connection.py')]
-    code += sorted((P4_ROOT/"p4").rglob("*.py"))
+    code = [Path(__file__),Path(__file__).with_name("p4_loader.py"),Path(__file__).with_name('api_connection.py')]
+    if not direct:
+        code += [P4_ROOT/"integration/runtime.py"] + sorted((P4_ROOT/"p4").rglob("*.py"))
     pipeline = hashlib.sha256(b"".join(p.read_bytes() for p in code) + fingerprint(p2_path()).encode()).hexdigest()[:16]
     budget = int(os.getenv("AGENT_TOKEN_BUDGET","6000"))
     if budget < 1: raise ValueError("AGENT_TOKEN_BUDGET must be positive")
-    return {"backend":"agent","provider":target,
+    return {"backend":"chat" if direct else "agent","provider":target,
         "model":settings.model,
         "endpoint_fingerprint":hashlib.sha256(endpoint.encode()).hexdigest()[:16],
-        "prompt_version":f"{config.PROMPT_VERSION}:{prompt_hash}","pipeline_version":pipeline,
-        "corpus_version":hashlib.sha256(json.dumps(corpus).encode()).hexdigest()[:16],
-        "generation":config.AGENT_SETTINGS,"json_mode":settings.json_mode,
+        "prompt_version":f"{'direct-chat-v1' if direct else config.PROMPT_VERSION}:{prompt_hash}","pipeline_version":pipeline,
+        "corpus_version":"none" if direct else hashlib.sha256(json.dumps(corpus).encode()).hexdigest()[:16],
+        "generation":{"max_tokens":512,"temperature":0.0} if direct else config.AGENT_SETTINGS,"json_mode":False if direct else settings.json_mode,
         "token_budget":budget,"p4_entrypoint":"integration.runtime.run_query"}
 
 
@@ -73,15 +81,16 @@ def load_retrieval(directory):
     return module
 
 
-def _span(name,kind,payload):
+def _span(name,kind,payload,mode='agent'):
     return trace_step(name,question=payload,conversation_id=None,as_type=kind,
-                      metadata={"mode":"agent","agent_connected":True})
+                      metadata={"mode":mode,"agent_connected":mode=='agent'})
 
 
 class MeteredClient:
-    def __init__(self, client, budget, *, bypass_cache=False):
+    def __init__(self, client, budget, *, bypass_cache=False, mode='agent'):
         self.client,self.budget,self.bypass_cache=client,budget,bypass_cache
         self.calls,self.cached_calls,self.tokens=0,0,0
+        self.mode=mode
         self.usage={"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
 
     def chat(self,messages,**kwargs):
@@ -97,7 +106,7 @@ class MeteredClient:
         self.tokens+=int(usage['total_tokens'] or 0)
         if getattr(result,'cached',False):
             self.cached_calls+=1
-            with _span('read-model-cache','span',{'tag':kwargs.get('tag','')}) as obs:
+            with _span('read-model-cache','span',{'tag':kwargs.get('tag','')},mode=self.mode) as obs:
                 update_observation(obs,output=result.text,metadata={'cache_hit':True})
         else:
             for key in self.usage: self.usage[key]+=int(usage.get(key) or 0)
@@ -134,6 +143,44 @@ def _close_client(client):
         for name in ('_client','_db'):
             resource=getattr(client,name,None)
             if resource is not None: resource.close()
+
+
+def run_direct_chat(question,history,config):
+    """One model call with recent conversation history, without P4 or retrieval."""
+    missing=connection().missing()
+    if missing:
+        return ChatResponse('Set up your model connection to start chatting.',successful=False,status='partial',
+            metrics={'mode':'chat','retrieval_used':False,'setup_required':True,'missing_setup':missing})
+    client=None
+    meter=None
+    try:
+        modules=load_p2(p2_path())
+        recent=[{'role':m['role'],'content':m['content']} for m in history
+                if m.get('role') in ('user','assistant')][-10:]
+        system={'role':'system','content':DIRECT_SYSTEM_PROMPT}
+        prompt={'role':'user','content':question}
+        output=config['generation']['max_tokens']
+        while recent and modules['llm_client'].estimate_tokens([system]+recent+[prompt])+output>min(8192,config['token_budget']):
+            recent=recent[2:]
+        messages=[system]+recent+[prompt]
+        client=_make_client(modules['llm_client'])
+        meter=MeteredClient(client,config['token_budget'],bypass_cache=config.get('bypass_model_cache',False),mode='chat')
+        result=meter.chat(messages,tag='p5.direct-chat',**config['generation'])
+        complete=bool(result.text.strip()) and getattr(result,'finish_reason','stop')=='stop'
+        return ChatResponse(result.text or 'The model returned no answer. Try a shorter request.',
+            successful=complete,cacheable=complete,status='answered' if complete else 'partial',usage=meter.usage,
+            metrics={'mode':'chat','retrieval_used':False,'llm_calls':meter.calls,'tool_calls':0,
+                     'model_cache_hits':meter.cached_calls,'tokens_accounted':meter.tokens})
+    except Exception as exc:
+        logger.warning('Direct model request failed (%s).',type(exc).__name__)
+        return ChatResponse('The model request failed. Check your API key, base URL and model ID.',
+            successful=False,status='partial',usage=meter.usage if meter else {},
+            metrics={'mode':'chat','retrieval_used':False,'failure':'model_request_failed',
+                     'error_type':type(exc).__name__,'http_status':getattr(exc,'status_code',None)})
+    finally:
+        if client is not None:
+            try: _close_client(client)
+            except Exception: logger.warning('Direct model client cleanup failed.')
 
 
 def run_agent(question,history,filters,config):
