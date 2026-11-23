@@ -29,7 +29,8 @@ class Connection:
 
 
 def connection():
-    base=os.getenv('LLM_BASE_URL','').strip().rstrip('/')
+    base=(os.getenv('IITK_API_BASE', '').strip() or os.getenv('LLM_BASE_URL', '').strip()).rstrip('/')
+    institute = bool(os.getenv('IITK_API_BASE', '').strip())
     target=os.getenv('LLM_TARGET','local').strip().lower()
     if base or target=='compatible':
         if base:
@@ -42,9 +43,11 @@ def connection():
                 raise ValueError('Use the API base URL, without /chat/completions')
         json_mode=os.getenv('LLM_JSON_MODE','true').lower().strip()
         if json_mode not in ('true','false'): raise ValueError('LLM_JSON_MODE must be true or false')
-        ca=os.getenv('LLM_TLS_CA_CERT','').strip()
+        ca=(os.getenv('LLM_TLS_CA_CERT', '').strip() or
+            (os.getenv('LLM_CA_CERT', '').strip() if institute else ''))
         if ca and not Path(ca).expanduser().is_file(): raise ValueError('LLM_TLS_CA_CERT file does not exist')
-        return Connection('compatible',base,os.getenv('LLM_MODEL','').strip(),os.getenv('LLM_API_KEY','').strip(),json_mode=='true',ca)
+        return Connection('compatible',base,(os.getenv('LLM_MODEL', '').strip() or ('Qwen/Qwen3-8B' if institute else '')),
+                          (os.getenv('IITK_API_KEY', '').strip() if institute else '') or os.getenv('LLM_API_KEY', '').strip(),json_mode=='true',ca)
     if target=='api':
         return Connection('api',os.getenv('LLM_API_BASE_URL','').strip(),os.getenv('LLM_MODEL','').strip() or 'Qwen/Qwen3-8B',
                           os.getenv('LLM_API_KEY',''),tls_ca=os.getenv('LLM_CA_CERT',''))

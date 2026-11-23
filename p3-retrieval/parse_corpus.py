@@ -11,7 +11,6 @@ To add new files:
 
 import fitz  # PyMuPDF
 import json
-import os
 import re
 import sys
 from pathlib import Path

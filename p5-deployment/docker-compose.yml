@@ -1,20 +1,51 @@
 services:
+  redis:
+    image: redis:8.10.3
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && redis-cli FT._LIST > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   streamlit:
     build:
       context: ..
       dockerfile: p5-deployment/Dockerfile
+      args:
+        INSTALL_LOCAL_MODELS: ${INSTALL_LOCAL_MODELS:-false}
     ports:
       - "127.0.0.1:8501:8501"
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     env_file:
       - path: .env
         required: false
     volumes:
       - chat-history:/app/p5-deployment/data
-      - ../p4-agent/p3_retrieval/index:/app/p4-agent/p3_retrieval/index:ro
-      - ../p4-agent/p3_retrieval/parsed:/app/p4-agent/p3_retrieval/parsed:ro
+      - type: bind
+        source: ../p4-agent/p3_retrieval/index
+        target: /app/p4-agent/p3_retrieval/index
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../p4-agent/p3_retrieval/parsed
+        target: /app/p4-agent/p3_retrieval/parsed
+        read_only: true
+        bind:
+          create_host_path: false
       - ./certs:/app/p5-deployment/certs:ro
     environment:
+      REDIS_URL: redis://redis:6379/0
       P3_RAG_PATH: /app/p4-agent/p3_retrieval
       LLM_LOG_PATH: /app/p5-deployment/data/logs/llm_calls.jsonl
       LLM_CACHE_PATH: /app/p5-deployment/data/llm_cache.sqlite
@@ -22,3 +53,4 @@ services:
 
 volumes:
   chat-history:
+  redis-data:

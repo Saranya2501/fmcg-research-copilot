@@ -43,24 +43,10 @@ def _load_p2(folder, revision):
 
 
 def load_p2(folder):
+    bundled = Path(__file__).resolve().parents[2] / "p4-agent/integration/p2_agents"
+    if Path(folder).resolve() == bundled:
+        from integration.p2_agents import agents, config, json_utils, llm_client, schemas
+        return {"agents": agents, "config": config, "json_utils": json_utils,
+                "llm_client": llm_client, "schemas": schemas}
     folder = str(Path(folder).resolve())
     return _load_p2(folder, fingerprint(folder))
-
-
-def load_runtime(path, calculator=None):
-    spec = importlib.util.spec_from_file_location("_fmcg_p4_turn", path)
-    module = importlib.util.module_from_spec(spec)
-    if calculator is None:
-        spec.loader.exec_module(module)
-    else:
-        class CalculatorHook(ast.NodeTransformer):
-            def visit_ImportFrom(self, node):
-                if node.module == 'p4.tools.calculator':
-                    return ast.copy_location(ast.Assign(
-                        targets=[ast.Name(id='calculator',ctx=ast.Store())],
-                        value=ast.Name(id='_p5_calculator',ctx=ast.Load())),node)
-                return node
-        tree=CalculatorHook().visit(ast.parse(Path(path).read_text(),filename=str(path)))
-        module.__dict__['_p5_calculator']=calculator
-        exec(compile(ast.fix_missing_locations(tree),str(path),'exec'),module.__dict__)
-    return module

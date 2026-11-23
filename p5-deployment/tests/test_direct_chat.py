@@ -8,14 +8,31 @@ from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import app
-import agent_bridge as bridge
-import tracing
+from integrations import agent_bridge as bridge
+from integrations import tracing
 
 
 class Model:
-    def __init__(self): self.calls=[];self.closed=False
+    def __init__(self):
+        self.calls=[];self.closed=False
+        self._client=SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=self.create)))
+
+    def create(self, **kwargs):
+        if not kwargs.get('stream'):
+            return None
+        chunks=[SimpleNamespace(usage=None, choices=[SimpleNamespace(
+            delta=SimpleNamespace(content=text), finish_reason=finish)])
+            for text,finish in [('Hello',None),(' from the model.',None),(None,'stop')]]
+        chunks.append(SimpleNamespace(choices=[], usage=SimpleNamespace(
+            prompt_tokens=10,completion_tokens=5,total_tokens=15)))
+        class Stream:
+            def __iter__(self): return iter(chunks)
+            def close(self): pass
+        return Stream()
     def chat(self,messages,**kwargs):
         self.calls.append((messages,kwargs))
+        self._client.chat.completions.create(messages=messages)
         return SimpleNamespace(text='Hello from the model.',usage={'prompt_tokens':10,'completion_tokens':5,'total_tokens':15},
                                cached=False,finish_reason='stop')
     def close(self): self.closed=True
@@ -60,6 +77,42 @@ class DirectChatTests(unittest.TestCase):
         self.assertEqual(saved['response']['usage']['total_tokens'],0)
         self.assertNotEqual(bridge.configuration()['backend'],bridge.configuration(direct=True)['backend'])
 
+    def test_fresh_chat_streams_and_cached_chat_returns_immediately(self):
+        model=Model()
+        first,second=app.create_conversation('chat'),app.create_conversation('chat')
+        updates=[]
+        cached_updates=[]
+        with patch.object(bridge,'_make_client',return_value=model):
+            answer=app.process_chat_turn('Hello',first,mode='chat',on_text=updates.append)
+            cached=app.process_chat_turn('Hello',second,mode='chat',on_text=cached_updates.append)
+        self.assertEqual(answer,'Hello from the model.')
+        self.assertEqual(cached,answer)
+        self.assertEqual(len(model.calls),1)
+        self.assertIn('Hello',updates)
+        self.assertEqual(updates[-1],answer)
+        self.assertEqual(cached_updates,[])
+        self.assertEqual(app.load_messages(first)[-1]['cache_status'],'miss')
+        self.assertEqual(app.load_messages(second)[-1]['cache_status'],'hit')
+
+    def test_env_disables_retrieval_for_research_turns(self):
+        model = Model()
+        conversation = app.create_conversation('research')
+        with patch.dict(os.environ, {'CHAT_RETRIEVAL_ENABLED': 'false'}), \
+             patch.object(bridge, '_make_client', return_value=model), \
+             patch.object(bridge, 'missing_setup', side_effect=AssertionError('No research setup')), \
+             patch.object(bridge, 'load_retrieval', side_effect=AssertionError('No retrieval')):
+            self.assertEqual(app.response_config()['backend'], 'chat')
+            app.process_chat_turn('Hello', conversation)
+        result = app.load_messages(conversation)[-1]['response']
+        self.assertEqual(result['metrics']['mode'], 'chat')
+        self.assertFalse(result['metrics']['retrieval_used'])
+        self.assertEqual(result['citations'], [])
+
+    def test_invalid_retrieval_setting_is_rejected(self):
+        with patch.dict(os.environ, {'CHAT_RETRIEVAL_ENABLED': 'invalid'}):
+            with self.assertRaisesRegex(ValueError, 'CHAT_RETRIEVAL_ENABLED'):
+                app.response_config()
+
     def test_missing_key_is_independent_of_missing_corpus(self):
         with patch.dict(os.environ,{'LLM_API_KEY':''}),patch.object(bridge,'_make_client') as make:
             result=bridge.run_direct_chat('Hello',[],bridge.configuration(direct=True))
@@ -80,6 +133,8 @@ class DirectChatTests(unittest.TestCase):
         model=Model()
         with patch.object(bridge,'_make_client',return_value=model):
             ui=AppTest.from_file(str(Path(app.__file__))).run()
+            ui.text_input[0].set_value("Test User")
+            ui.button[0].click().run()
             original=ui.session_state['active_conversation_id']
             ui.toggle[0].set_value(True).run()
             direct=ui.session_state['active_conversation_id']
@@ -88,6 +143,7 @@ class DirectChatTests(unittest.TestCase):
             ui.chat_input[0].set_value('Hello').run()
             self.assertFalse(ui.exception)
             self.assertEqual(ui.session_state['messages'][-1]['content'],'Hello from the model.')
+            self.assertTrue(any(c.value=='Tokens · Input: 10 · Output: 5 · Total: 15' for c in ui.caption))
             ui.toggle[0].set_value(False).run()
             self.assertTrue(any('Research setup' in w.value for w in ui.warning))
             ui.sidebar.button(key='history_'+direct).click().run()

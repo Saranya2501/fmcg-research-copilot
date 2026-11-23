@@ -4,6 +4,21 @@ Owner: Irfan
 
 Owns Langfuse tracing integration, the evaluation runner with trace output, Streamlit entry point, and Docker configuration.
 
+## Runtime dependencies
+
+Use the repository-root [quick start](../README.md#run-the-agent) for Docker Compose
+and direct Python startup with the existing index and supplied `.env`.
+`requirements.txt` is runtime-only and does not include the P4 development list or
+index-building dependencies. The default install excludes sentence-transformers
+and PyTorch: configure `IITK_EMBED_URL` / `IITK_EMBED_KEY` and set
+`RAG_RERANKER_ENABLED=false` in your existing `.env` as well as new installations.
+FAISS, NumPy and BM25 are needed to search the prebuilt indexes.
+
+For local query embeddings or reranking, install `requirements-local-models.txt`.
+For Docker set `INSTALL_LOCAL_MODELS=true` in `.env` and build from the root with
+`docker compose --env-file p5-deployment/.env up --build -d`.
+These packages serve queries; they do not rebuild the index.
+
 ## Run with Docker
 
 Install and start Docker Desktop, then run from the repository root:
@@ -16,6 +31,31 @@ Open http://localhost:8501. The app uses the latest supplied P4 Python query run
 It includes a chat input, conversation history for the current session, and a New chat
 button. Research needs a configured model and the complete P3 source-data layout.
 Until those are available, the app shows setup information rather than fabricated answers.
+
+### Redis and future vector search
+
+Compose also runs `redis:8.10.3`, which includes Redis Search and vector indexes.
+Redis persists data in the `redis-data` volume with append-only persistence enabled.
+The app waits for Redis to be healthy and uses `REDIS_URL=redis://redis:6379/0`
+inside Compose. Port 6379 is exposed only on localhost for local development.
+This local setup does not configure Redis authentication.
+
+For a local Streamlit process, start only Redis and set
+`REDIS_URL=redis://localhost:6379/0` in `.env`:
+
+```bash
+docker compose -f p5-deployment/docker-compose.yml up -d redis
+```
+
+`redis_connection.get_redis_client()` supplies a shared connection pool, verifies
+connectivity and Redis Search availability, and preserves binary embedding bytes.
+When `REDIS_URL` is unset, local runs do not require Redis. A configured but
+unavailable Redis service stops app initialization with a setup error.
+Existing SQLite history/caches and P3 retrieval are unchanged. Future vector
+integration can use this client with `FT.CREATE` / `FT.SEARCH`; the index schema
+and embedding dimensions should be chosen when that integration is implemented.
+See the [Redis vector search documentation](https://redis.io/docs/latest/get-started/vector-database/).
+`docker compose down` preserves Redis data; adding `-v` deletes Compose volumes.
 
 ## Saved conversations
 
@@ -58,6 +98,12 @@ excluded from Git.
 
 ## Chat without retrieval
 
+Set `CHAT_RETRIEVAL_ENABLED=false` in `p5-deployment/.env` and restart the app
+to disable retrieval globally. This forces direct model chat, including for saved
+research conversations, and locks the sidebar toggle on. No source files, embedding
+model or reranker are loaded. Model API configuration is still required. The default
+is `true`, which allows the sidebar to select either mode.
+
 Turn on **Chat with model** in the sidebar to skip document retrieval and the P4
 research pipeline. This makes one conversational model call using your configured
 API and recent chat history. The parsed corpus and indexes are not checked or used
@@ -71,6 +117,13 @@ fit the model client's token budget. Turning the switch off returns to research,
 which still requires the complete parsed corpus and indexes.
 
 ## Connect your API
+
+P5 also accepts P2's `IITK_API_BASE` and `IITK_API_KEY` names. Set these in
+`p5-deployment/.env`, along with `LLM_TLS_CA_CERT` pointing to `vm07-ca.crt`.
+`IITK_API_BASE` takes precedence over `LLM_BASE_URL` and automatically activates
+API chat; `LLM_MODEL` defaults to `Qwen/Qwen3-8B` for this endpoint. Existing
+`LLM_*` configurations remain supported. For Docker set the certificate path to
+`/app/p5-deployment/certs/vm07-ca.crt`.
 
 For an OpenAI-compatible Chat Completions provider, set just these three values
 in `p5-deployment/.env` and restart Streamlit:
@@ -171,7 +224,7 @@ The cache is tested through the supplied P4 runner with scripted model replies a
 
 ## Latest P4 integration
 
-`agent_bridge.py` calls the entry point documented by the new P4 package:
+`integrations/agent_bridge.py` calls the entry point documented by the new P4 package:
 `p4-agent/integration/runtime.py::run_query(question, p2_path, p3_path, llm=...)`.
 It does not invoke the old P4 graph rewrite. The supplied P4/P2 source is preserved;
 the adapter loads P2 into an isolated import namespace, avoiding collisions with
@@ -227,13 +280,13 @@ public deployment across sessions or servers.
 
 ## Files
 
-- `app.py` — Streamlit chat interface with session history and an explicit preview status
+- `app.py` — thin Streamlit entry point; loads environment settings before importing the UI
 - `requirements.txt` — dependencies for the current Streamlit starter
-- `tracing.py` — session-aware tracing, masking, and optional client setup
-- `response_cache.py` — exact cache keys, persistent responses, expiry and clearing
-- `agent_bridge.py` — latest P4 runner adapter, response normalization and usage collection
-- `p4_loader.py` — isolated imports of the received flat P2 source
-- `api_connection.py` — common API configuration and OpenAI-compatible transport
+- `integrations/tracing.py` — session-aware tracing, masking, and optional client setup
+- `storage/response_cache.py` — exact cache keys, persistent responses, expiry and clearing
+- `integrations/agent_bridge.py` — latest P4 runner adapter, response normalization and usage collection
+- `integrations/external_p2.py` — isolated imports of the received flat P2 source
+- `integrations/api_connection.py` — common API configuration and OpenAI-compatible transport
 - `Dockerfile` — Python 3.11 image with a non-root user and health check
 - `docker-compose.yml` — app service available locally on port 8501
 - `../.dockerignore` — excludes credentials and generated data from the build context
@@ -244,3 +297,59 @@ Supply the full P3 parsed corpus and choose a configured Ollama or institute API
 target. Docker mounts the P3 index and parsed corpus read-only; configure certificate
 paths inside the container and use `host.docker.internal` for Ollama on a Mac host.
 Then verify real research answers before running the approved gold evaluation set.
+
+## Named user sessions
+
+The app asks for a name before opening the chat. Each submission creates a unique
+session, even when two people enter the same name. Conversations are assigned to
+that session and the sidebar lists only its conversations. Existing conversations
+without a session remain in the database and are not assigned to a new user.
+
+The sidebar shows total tokens across the session's saved
+assistant turns; each reply also shows its own usage. Response-cache and model-cache
+hits add zero new tokens. These are provider-reported token counts; missing provider
+usage is not an estimated billing amount.
+
+Session records and usage are stored in the configured SQLite history database.
+The session and selected chat IDs are preserved in URL query parameters, so refreshing
+the same URL restores the name, active conversation, mode, and token totals. Opening
+the bare app URL restores the last session remembered in this browser. Only session
+and chat identifiers are saved in local storage; messages remain in SQLite. An explicit
+session URL takes priority. Clearing browser site data removes this remembered link. Treat the session URL as a private resume link;
+a name is a display label, not authenticated identity.
+
+## Optional reranker
+
+Set `RAG_RERANKER_ENABLED=false` in `p5-deployment/.env` to skip the local
+BGE reranker and its download. Retrieval still combines BM25 and dense search,
+returning passages in reciprocal-rank fusion order. Set it to `true` and install `requirements-local-models.txt`
+to enable reranking. The lightweight environment template defaults to `false`. Restart Streamlit after changing this setting; an already
+running download is not cancelled by editing the file. Cache keys distinguish
+the two modes. Disabling reranking may affect passage relevance.
+
+### P5 code organization
+
+P5 follows a layered architecture with a Repository pattern for SQLite persistence
+and an application service for chat turns. Dependencies flow from UI to service
+and repository modules; backend and persistence code do not import Streamlit.
+
+- `ui/chat.py`: chat page and input flow.
+- `ui/sidebar.py`: conversation history and mode controls.
+- `ui/messages.py`: message, token usage, citation, and evidence rendering.
+- `ui/session.py`: session onboarding and conversation selection callbacks.
+- `ui/browser_session.py`: browser resume storage component.
+- `ui/styles.py`: existing presentation styles.
+- `chat/chat_service.py`: turn orchestration, response caching, tracing, and history.
+- `chat/response_backend.py`: dispatch to direct chat, research, or preview adapters.
+- `chat/chat_models.py`: shared response data model.
+- `storage/history_repository.py`: conversation, message, and session queries, including
+  the shared ownership guard used by the service and UI callbacks.
+- `storage/database.py`: SQLite connections and legacy schema migrations.
+- `chat/chat_settings.py`: environment configuration and validation.
+- `chat/rate_limit.py`: reusable sliding-window rate limit helper.
+
+Existing adapter, API, streaming, cache, Redis, and tracing modules retain their
+focused responsibilities. `app.py` re-exports the previous public chat/history
+functions for callers; new code should import from the responsible module.
+Tests patch dependencies in their owning module, such as `chat.chat_service`.
+The Docker build includes the `app.py` entry point and the `chat`, `integrations`, `storage`, and `ui` packages.

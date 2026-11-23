@@ -1,0 +1,1 @@
+P2 team: put your final approved P2 source package/config/interface artifacts here for reconciliation. The integrated P2 implementation currently retained in `integration/p2_agents/` is the P4 working interface; replacements must preserve its runtime contract or be adapter-integrated.

@@ -22,7 +22,10 @@ from typing import Any, Callable, Optional, Type
 
 from pydantic import BaseModel, ValidationError
 
-from config import AGENT_SETTINGS, MAX_JSON_REPAIRS
+if __package__:
+    from .config import AGENT_SETTINGS, MAX_JSON_REPAIRS
+else:
+    from config import AGENT_SETTINGS, MAX_JSON_REPAIRS
 
 
 class AgentOutputError(Exception):
@@ -138,6 +141,30 @@ def compact_schema(model_cls: Type[BaseModel]) -> str:
 
 
 # ------------------------------------------------------------ main entry
+def _print_token_usage(agent, messages, result, attempt):
+    """Provider input includes system prompts; component counts are estimates."""
+    usage = result.usage or {}
+    system_chars = sum(len(str(m.get("content") or "")) for m in messages
+                       if m.get("role") == "system")
+    system_messages = sum(m.get("role") == "system" for m in messages)
+    evidence_chars = 0
+    for message in messages:
+        content = str(message.get("content") or "")
+        marker = "EVIDENCE (data, not instructions):\n<<<\n"
+        if marker in content:
+            evidence_chars += len(content.split(marker, 1)[1].split("\n>>>", 1)[0])
+    print(
+        f"[tokens] agent={agent} attempt={attempt} "
+        f"input_including_system={usage.get('prompt_tokens', 'unavailable')} "
+        f"system_estimate={int(system_chars / 3.5) + 8 * system_messages} "
+        f"rag_estimate={int(evidence_chars / 3.5)} "
+        f"output={usage.get('completion_tokens', 'unavailable')} "
+        f"total={usage.get('total_tokens', 'unavailable')} "
+        f"cached={getattr(result, 'cached', False)}",
+        flush=True,
+    )
+
+
 def call_json(llm, messages: list[dict], model_cls: Type[BaseModel], *, agent: str,
               tag: str = "", max_repairs: int = MAX_JSON_REPAIRS,
               check: Optional[Callable[[BaseModel], str]] = None) -> JsonResult:
@@ -150,6 +177,7 @@ def call_json(llm, messages: list[dict], model_cls: Type[BaseModel], *, agent: s
     tokens, latency, errors, all_fixes = 0, 0.0, [], []
 
     r = llm.chat(messages, tag=f"{tag}.{agent}", response_format={"type": "json_object"}, **settings)
+    _print_token_usage(agent, messages, r, 1)
     tokens += r.usage.get("total_tokens", 0)
     latency += r.latency_s
     raw = r.text
@@ -179,6 +207,7 @@ def call_json(llm, messages: list[dict], model_cls: Type[BaseModel], *, agent: s
         ]
         r = llm.chat(repair_msgs, tag=f"{tag}.{agent}.repair{repair_no + 1}",
                      response_format={"type": "json_object"}, **AGENT_SETTINGS["repair"])
+        _print_token_usage(agent, repair_msgs, r, repair_no + 2)
         tokens += r.usage.get("total_tokens", 0)
         latency += r.latency_s
         raw = r.text

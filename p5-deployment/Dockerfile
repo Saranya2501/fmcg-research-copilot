@@ -2,27 +2,28 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    RAG_RERANKER_ENABLED=false
 
 WORKDIR /app
 
 COPY p5-deployment/requirements.txt /app/p5-deployment/requirements.txt
-COPY p4-agent/requirements.txt /app/p4-agent/requirements.txt
-COPY p4-agent/p3_retrieval/requirements.txt /app/p4-agent/p3_retrieval/requirements.txt
+COPY p5-deployment/requirements-local-models.txt /app/p5-deployment/requirements-local-models.txt
+ARG INSTALL_LOCAL_MODELS=false
 RUN pip install -r /app/p5-deployment/requirements.txt \
+    && if [ "$INSTALL_LOCAL_MODELS" = "true" ]; then pip install -r /app/p5-deployment/requirements-local-models.txt; fi \
     && useradd --create-home appuser \
     && mkdir -p /app/p5-deployment/data \
     && chown appuser:appuser /app/p5-deployment/data
 
-COPY --chown=appuser:appuser p5-deployment/app.py /app/p5-deployment/app.py
-COPY --chown=appuser:appuser p5-deployment/tracing.py /app/p5-deployment/tracing.py
-COPY --chown=appuser:appuser p5-deployment/response_cache.py /app/p5-deployment/response_cache.py
-COPY --chown=appuser:appuser p5-deployment/agent_bridge.py /app/p5-deployment/agent_bridge.py
+COPY --chown=appuser:appuser p5-deployment/app.py /app/p5-deployment/
+COPY --chown=appuser:appuser p5-deployment/chat /app/p5-deployment/chat
+COPY --chown=appuser:appuser p5-deployment/integrations /app/p5-deployment/integrations
+COPY --chown=appuser:appuser p5-deployment/storage /app/p5-deployment/storage
+COPY --chown=appuser:appuser p5-deployment/ui /app/p5-deployment/ui
 COPY --chown=appuser:appuser p4-agent/p4 /app/p4-agent/p4
 COPY --chown=appuser:appuser p4-agent/integration/runtime.py /app/p4-agent/integration/runtime.py
 COPY --chown=appuser:appuser p4-agent/integration/p2_agents /app/p4-agent/integration/p2_agents
-COPY --chown=appuser:appuser p5-deployment/p4_loader.py /app/p5-deployment/p4_loader.py
-COPY --chown=appuser:appuser p5-deployment/api_connection.py /app/p5-deployment/api_connection.py
 COPY --chown=appuser:appuser p4-agent/p3_retrieval/retrieve.py /app/p4-agent/p3_retrieval/retrieve.py
 
 USER appuser

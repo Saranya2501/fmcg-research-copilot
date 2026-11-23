@@ -11,9 +11,9 @@ from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import app
-import agent_bridge as bridge
-import tracing
-from p4_loader import load_p2
+from integrations import agent_bridge as bridge
+from integrations import tracing
+from integrations.external_p2 import load_p2
 
 GATE={'use_case':'UC1','in_scope':True,'companies':['HUL'],'metrics':['revenue'],'fiscal_years':['FY24'],'resolved_question':'HUL revenue FY24?'}
 PLAN={'subtasks':[{'id':'t1','company':'HUL','metric':'revenue','fiscal_year':'FY24','kind':'lookup','question':'HUL revenue FY24?'}],
@@ -141,21 +141,24 @@ class LatestP4BridgeTests(unittest.TestCase):
         self.assertEqual(result.metrics['tool_calls'],2)
         self.assertEqual(result.results[-1]['value'],50)
 
-    def test_streamlit_shows_latest_p4_sources_trace_and_cached_answer(self):
+    def test_streamlit_shows_sources_without_technical_labels(self):
         from streamlit.testing.v1 import AppTest
         model=ScriptedModel([GATE,PLAN,QUERY,ANALYST,WRITER,CRITIC])
         with patch.object(bridge,'missing_setup',return_value=[]),patch.object(bridge,'load_retrieval',return_value=self.p3),\
              patch.object(bridge,'_make_client',return_value=model),\
              patch.object(tracing,'trace_identity',return_value=('ui-trace','https://example.test/ui-trace')):
             ui=AppTest.from_file(str(Path(app.__file__))).run()
+            ui.text_input[0].set_value("Test User")
+            ui.button[0].click().run()
             ui.chat_input[0].set_value('HUL revenue FY24?').run()
             self.assertFalse(ui.exception)
             self.assertTrue(any(e.label=='Sources' for e in ui.expander))
-            self.assertEqual(ui.get('link_button')[0].proto.url,'https://example.test/ui-trace')
+            self.assertEqual(len(ui.get('link_button')),0)
             ui.sidebar.button[0].click().run()
             ui.chat_input[0].set_value('HUL revenue FY24?').run()
             self.assertEqual(len(model.calls),6)
-            self.assertTrue(any(c.value=='Cached response' for c in ui.caption))
+            self.assertFalse(any(c.value=='Cached response' for c in ui.caption))
+            self.assertTrue(any(e.label=='Sources' for e in ui.expander))
             self.assertEqual(ui.session_state['messages'][-1]['response']['agent_context']['companies'],['HUL'])
 
 

@@ -2,23 +2,15 @@
 
 import hashlib
 import json
+import logging
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
+
+from chat.chat_models import ChatResponse
 
 
-@dataclass
-class ChatResponse:
-    answer: str
-    citations: list[dict] = field(default_factory=list)
-    successful: bool = True
-    cacheable: bool = False
-    status: str = "answered"
-    results: list[dict] = field(default_factory=list)
-    limitations: list[str] = field(default_factory=list)
-    agent_context: dict = field(default_factory=dict)
-    usage: dict = field(default_factory=dict)
-    metrics: dict = field(default_factory=dict)
-    sections: list[dict] = field(default_factory=list)
+logger = logging.getLogger(__name__)
+
 
 
 def cache_key(question: str, history: list[dict], filters: dict, config: dict) -> str:
@@ -52,6 +44,7 @@ def lookup(db, key: str, *, now: float | None = None) -> ChatResponse | None:
             raise ValueError("Invalid cached response")
         return result
     except (TypeError, ValueError, AttributeError):
+        logger.exception("Invalid cached response; discarding entry.")
         db.execute("DELETE FROM response_cache WHERE cache_key = ?", (key,))
         return None
 

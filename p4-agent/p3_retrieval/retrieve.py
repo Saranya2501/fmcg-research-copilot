@@ -22,7 +22,6 @@ import httpx
 import numpy as np
 from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer, CrossEncoder
 
 load_dotenv()
 warnings.filterwarnings("ignore")
@@ -33,8 +32,8 @@ INDEX_DIR = RAG_DIR / "index"
 PARSED_DIR = RAG_DIR / "parsed"
 
 # ── Models (loaded lazily on first call) ─────────────────────────────────────
-_embedder: Optional[SentenceTransformer] = None
-_reranker: Optional[CrossEncoder] = None
+_embedder = None
+_reranker = None
 _bm25_data: Optional[dict] = None
 _faiss_index: Optional[faiss.Index] = None
 _faiss_ids: Optional[list[str]] = None
@@ -86,17 +85,41 @@ def _encode(texts: list[str]) -> np.ndarray:
         except Exception as exc:
             warnings.warn(f"Embedding API failed ({exc}), falling back to local model")
     if _embedder is None:
+        SentenceTransformer, _ = _local_model_classes()
         _embedder = SentenceTransformer(EMBED_MODEL)
     vecs = _embedder.encode(texts, normalize_embeddings=True)
     return np.array(vecs, dtype=np.float32)
+
+
+def reranker_enabled():
+    """Whether to load and use the optional local cross-encoder."""
+    value = os.getenv("RAG_RERANKER_ENABLED", "true").strip().lower()
+    if value not in {"true", "false"}:
+        raise ValueError("RAG_RERANKER_ENABLED must be true or false")
+    return value == "true"
+
+
+def _local_model_classes():
+    try:
+        from sentence_transformers import SentenceTransformer, CrossEncoder
+    except ImportError as exc:
+        raise RuntimeError(
+            "Local query embeddings/reranking require the optional dependencies: "
+            "pip install -r p5-deployment/requirements-local-models.txt. "
+            "For the lightweight runtime, configure IITK_EMBED_URL and IITK_EMBED_KEY "
+            "and set RAG_RERANKER_ENABLED=false."
+        ) from exc
+    return SentenceTransformer, CrossEncoder
 
 
 def _load_models():
     global _embedder, _reranker
     # Skip local embedder load when the API is configured — _encode() handles lazy loading
     if _embedder is None and not (os.getenv("IITK_EMBED_URL") and os.getenv("IITK_EMBED_KEY")):
+        SentenceTransformer, _ = _local_model_classes()
         _embedder = SentenceTransformer(EMBED_MODEL)
-    if _reranker is None:
+    if reranker_enabled() and _reranker is None:
+        _, CrossEncoder = _local_model_classes()
         _reranker = CrossEncoder(RERANK_MODEL)
 
 
@@ -223,11 +246,16 @@ def retrieve(
 
     # ── Rerank ────────────────────────────────────────────────────────────
     candidate_chunks = [_chunk_map[cid] for cid in candidate_ids if cid in _chunk_map]
-    pairs = [(query, c["text"]) for c in candidate_chunks]
-    rerank_scores = _reranker.predict(pairs)
-    ranked_with_scores = sorted(
-        zip(rerank_scores, candidate_chunks), key=lambda x: x[0], reverse=True
-    )
+    if reranker_enabled() and candidate_chunks:
+        pairs = [(query, c["text"]) for c in candidate_chunks]
+        rerank_scores = _reranker.predict(pairs)
+        ranked_with_scores = sorted(
+            zip(rerank_scores, candidate_chunks), key=lambda x: x[0], reverse=True
+        )
+    else:
+        # Keep the hybrid retrieval order and its reciprocal-rank fusion scores.
+        fusion_scores = dict(merged)
+        ranked_with_scores = [(fusion_scores[cid], _chunk_map[cid]) for cid in candidate_ids if cid in _chunk_map]
 
     # ── Build output ──────────────────────────────────────────────────────
     result = []

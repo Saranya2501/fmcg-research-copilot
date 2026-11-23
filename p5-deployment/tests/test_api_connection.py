@@ -10,9 +10,9 @@ import httpx
 from openai import OpenAI as RealOpenAI, AuthenticationError
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import api_connection
-import agent_bridge
-from p4_loader import load_p2
+from integrations import api_connection
+from integrations import agent_bridge
+from integrations.external_p2 import load_p2
 
 
 class ConnectionTests(unittest.TestCase):
@@ -49,6 +49,29 @@ class ConnectionTests(unittest.TestCase):
         modules=load_p2(agent_bridge.p2_path())
         with patch.object(agent_bridge,'get_tracing_client',return_value=None),patch('openai.OpenAI',side_effect=self.factory):
             return agent_bridge._make_client(modules['llm_client'])
+
+    def test_p2_names_use_certificate_and_model_api(self):
+        import ssl
+        cert = Path(ssl.get_default_verify_paths().cafile)
+        with patch.dict(os.environ, {
+            'IITK_API_BASE': 'https://institute.invalid/v1',
+            'IITK_API_KEY': 'institute-test-key',
+            'LLM_TLS_CA_CERT': str(cert), 'LLM_MODEL': '',
+        }):
+            settings = api_connection.connection()
+            self.assertEqual(settings.base_url, 'https://institute.invalid/v1')
+            self.assertEqual(settings.tls_ca, str(cert))
+            self.assertEqual(settings.model, 'Qwen/Qwen3-8B')
+            self.assertEqual(settings.api_key, 'institute-test-key')
+            client = self.make()
+            try:
+                client.chat([{'role': 'user', 'content': 'Hello'}])
+                self.assertEqual(str(self.requests[0].url),
+                                 'https://institute.invalid/v1/chat/completions')
+                self.assertEqual(self.requests[0].headers['authorization'],
+                                 'Bearer institute-test-key')
+            finally:
+                agent_bridge._close_client(client)
 
     def test_three_settings_activate_compatible_mode_without_certificate(self):
         settings=api_connection.connection()

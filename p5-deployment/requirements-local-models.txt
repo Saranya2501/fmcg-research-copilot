@@ -1,0 +1,3 @@
+# Optional query embeddings and reranking on this machine (pulls in PyTorch).
+-r requirements.txt
+sentence-transformers>=3,<6

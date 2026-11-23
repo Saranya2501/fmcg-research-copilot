@@ -76,8 +76,6 @@ print(f"  parsed dir: {P3_DIR / 'parsed'} — exists: {(P3_DIR / 'parsed').exist
 # retrieve.py uses Path(__file__).parent — patch it after import
 # by setting the module-level RAG_DIR to point to P3_DIR.
 
-import importlib, types
-
 # Import and immediately patch path constants before first use
 import retrieve as _r
 _r.RAG_DIR    = P3_DIR

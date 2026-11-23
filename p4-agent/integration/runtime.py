@@ -4,9 +4,10 @@ Usage requires paths to the P2 package and P3 RAG source. It intentionally does
 not ship credentials or a copy of P3's large index.
 """
 from __future__ import annotations
-import importlib, sys, re, math
+import importlib
+import re
+import sys
 from pathlib import Path
-from typing import Any
 
 
 def load_p2(p2_path: str):
@@ -45,14 +46,15 @@ def normalize_chunks(records, ChunkModel):
     return normalized
 
 
-def run_query(question: str, p2_path: str, p3_path: str, llm=None, tag="p4.integrated"):
+def run_query(question: str, p2_path: str, p3_path: str, llm=None, tag="p4.integrated", *,
+              p2_modules=None, retrieval=None, calculator=None):
     """Single answer path using real P2 agents and P3 retrieval; API calls occur here.
 
     This function requires both teammate packages and credentials configured by P2.
     It is deliberately conservative: only retrieves and answers, no brief export.
     """
-    agents, clientmod, schemas = load_p2(p2_path)
-    p3 = load_p3(p3_path)
+    agents, clientmod, schemas = p2_modules if p2_modules is not None else load_p2(p2_path)
+    p3 = retrieval if retrieval is not None else load_p3(p3_path)
     llm = llm or clientmod.LLMClient()
     state = schemas.ConversationState()
     gate = _as_obj(agents.run_gatekeeper(llm, question, state, tag=tag))
@@ -89,7 +91,8 @@ def run_query(question: str, p2_path: str, p3_path: str, llm=None, tag="p4.integ
             # The P4 calculator accepts arithmetic AST only; substitute named variables before evaluation.
             for name,val in sorted(substitutions.items(), key=lambda x:-len(x[0])):
                 expr=re.sub(rf"\b{re.escape(name)}\b", str(float(val)), expr)
-            from p4.tools.calculator import calculator
+            if calculator is None:
+                from p4.tools.calculator import calculator
             calculated=calculator(expr)["value"]
         for v in vals:
             results.append({"subtask_id":subtask.id,"company":subtask.company,

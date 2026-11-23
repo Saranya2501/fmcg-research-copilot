@@ -1,4 +1,6 @@
+import builtins
 import os
+import runpy
 from pathlib import Path
 import sys
 import tempfile
@@ -6,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import agent_bridge
+from integrations import agent_bridge
 
 
 class P4RetrievalSelectionTests(unittest.TestCase):
@@ -14,8 +16,28 @@ class P4RetrievalSelectionTests(unittest.TestCase):
         with patch.dict(os.environ,{'P3_RAG_PATH':''}):
             self.assertEqual(agent_bridge.rag_path(),(agent_bridge.P4_ROOT/'p3_retrieval').resolve())
         requirements=(Path(__file__).resolve().parents[1]/'requirements.txt').read_text()
-        self.assertIn('../p4-agent/p3_retrieval/requirements.txt',requirements)
+        self.assertIn('faiss-cpu',requirements)
+        self.assertIn('rank-bm25',requirements)
+        self.assertNotIn('-r ',requirements)
+        for excluded in ('sentence-transformers', 'torch', 'pytest', 'pymupdf', 'pdfplumber', 'langgraph', 'python-docx'):
+            self.assertNotIn(excluded,requirements.lower())
         self.assertNotIn('../p3-retrieval/',requirements)
+
+    def test_api_retrieval_does_not_import_local_models(self):
+        original_import = builtins.__import__
+
+        def import_without_local_models(name, *args, **kwargs):
+            if name == 'sentence_transformers' or name.startswith('sentence_transformers.'):
+                raise ImportError('Local models intentionally absent')
+            return original_import(name, *args, **kwargs)
+
+        settings = {'IITK_EMBED_URL': 'https://example.invalid/embeddings',
+                    'IITK_EMBED_KEY': 'test', 'RAG_RERANKER_ENABLED': 'false'}
+        with patch.dict(os.environ, settings), patch('builtins.__import__', side_effect=import_without_local_models):
+            retrieval = runpy.run_path(str(agent_bridge.P4_ROOT/'p3_retrieval'/'retrieve.py'))
+            retrieval['_load_models']()
+            with self.assertRaisesRegex(RuntimeError, 'requirements-local-models.txt'):
+                retrieval['_local_model_classes']()
 
     def test_explicit_external_layout_is_checked_relative_to_its_own_folder(self):
         with tempfile.TemporaryDirectory() as directory:

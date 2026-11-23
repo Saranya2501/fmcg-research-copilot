@@ -40,7 +40,7 @@ def get_tracing_client():
     try:
         return Langfuse(mask_otel_spans=mask_export, timeout=5)
     except Exception:
-        logger.warning("Langfuse initialization failed; chat will continue without tracing.")
+        logger.exception("Langfuse initialization failed; chat will continue without tracing.")
         return None
 
 
@@ -49,7 +49,7 @@ def update_observation(observation, **fields):
         try:
             observation.update(**fields)
         except Exception:
-            logger.warning("Langfuse observation update failed.")
+            logger.exception("Langfuse observation update failed.")
 
 
 def trace_identity(observation) -> tuple[str | None, str | None]:
@@ -60,7 +60,7 @@ def trace_identity(observation) -> tuple[str | None, str | None]:
         client = get_tracing_client()
         return trace_id, client.get_trace_url(trace_id=trace_id) if client else None
     except Exception:
-        logger.warning("Langfuse trace link unavailable.")
+        logger.exception("Langfuse trace link unavailable.")
         return getattr(observation, "trace_id", None), None
 
 
@@ -82,12 +82,13 @@ def trace_step(name: str, *, question, conversation_id: str | None, metadata: di
         ))
     except Exception:
         stack.close()
-        logger.warning("Langfuse trace setup failed; chat will continue without tracing.")
+        logger.exception("Langfuse trace setup failed; chat will continue without tracing.")
         yield None
         return
     try:
         yield observation
     except Exception:
+        logger.exception("Chat processing failed in trace %s.", name)
         update_observation(observation, level="ERROR", status_message="Chat processing failed")
         raise
     finally:
@@ -95,4 +96,4 @@ def trace_step(name: str, *, question, conversation_id: str | None, metadata: di
         try:
             stack.close()
         except Exception:
-            logger.warning("Langfuse trace completion failed.")
+            logger.exception("Langfuse trace completion failed.")

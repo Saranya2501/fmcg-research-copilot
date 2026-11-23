@@ -1,6 +1,5 @@
 """Command-line wrapper around the integrated P2/P3 runtime."""
 import argparse, json, os
-from pathlib import Path
 from integration.runtime import run_query
 
 

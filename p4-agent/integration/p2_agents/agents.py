@@ -18,11 +18,22 @@ import json
 import re
 from pathlib import Path
 
-from config import (COVERED_COMPANIES, MAX_CHUNK_CHARS, MAX_EVIDENCE_CHARS,
-                    MAX_EVIDENCE_CHUNKS, MAX_SUBTASKS)
-from json_utils import JsonResult, call_json
-from schemas import (AnalystOutput, AnswerOutput, Chunk, Citation, ConversationState, CriticIssue,
-                     CriticOutput, GateOutput, PlanOutput, QueryOutput, SectionOutput, SubTask)
+if __package__:
+    from .config import (COVERED_COMPANIES, MAX_CHUNK_CHARS, MAX_EVIDENCE_CHARS,
+                        MAX_EVIDENCE_CHUNKS, MAX_SUBTASKS)
+else:
+    from config import (COVERED_COMPANIES, MAX_CHUNK_CHARS, MAX_EVIDENCE_CHARS,
+                        MAX_EVIDENCE_CHUNKS, MAX_SUBTASKS)
+if __package__:
+    from .json_utils import JsonResult, call_json
+else:
+    from json_utils import JsonResult, call_json
+if __package__:
+    from .schemas import (AnalystOutput, AnswerOutput, Chunk, Citation, ConversationState, CriticIssue,
+                         CriticOutput, GateOutput, PlanOutput, QueryOutput, SectionOutput, SubTask)
+else:
+    from schemas import (AnalystOutput, AnswerOutput, Chunk, Citation, ConversationState, CriticIssue,
+                         CriticOutput, GateOutput, PlanOutput, QueryOutput, SectionOutput, SubTask)
 
 # Metrics that always need the calculator (agents-v2: the live check showed the
 # Planner labelling "EBITDA margin" and "% of revenue" as plain lookups).

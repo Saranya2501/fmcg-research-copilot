@@ -12,8 +12,9 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 import app
-import tracing
-from response_cache import ChatResponse
+from chat import chat_service
+from integrations import tracing
+from storage.response_cache import ChatResponse
 
 
 class TracingTests(unittest.TestCase):
@@ -87,8 +88,8 @@ class TracingTests(unittest.TestCase):
         response = ChatResponse("Answer", [{"doc_id": "test", "page": 1}], cacheable=True)
         with patch.object(tracing, "get_tracing_client", return_value=self.client), \
              patch.object(self.client, "get_trace_url", side_effect=lambda trace_id: f"https://example.test/traces/{trace_id}"), \
-             patch.object(app, "response_config", return_value=config), \
-             patch.object(app, "generate_response", return_value=response) as generate, \
+             patch.object(chat_service, "response_config", return_value=config), \
+             patch.object(chat_service, "generate_response", return_value=response) as generate, \
              patch.dict(os.environ, {"CHAT_CACHE_ENABLED": "true"}):
             first, second = app.create_conversation(), app.create_conversation()
             app.process_chat_turn("same question", first)

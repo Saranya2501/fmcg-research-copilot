@@ -1,0 +1,1 @@
+The manifest `p3_corpus_manifest.csv` describes the ten uploaded company ZIPs and their PDF filenames. The report PDFs are intentionally not copied into this P4 code ZIP because the ten source archives total over 1 GB. Use the Colab notebook to stage them from Google Drive or upload them separately.
