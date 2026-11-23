@@ -76,7 +76,7 @@ def detect_section(text: str) -> str:
 
 def detect_consolidated(text: str) -> str:
     """Detect standalone vs consolidated from page text."""
-    snippet = text[:300].upper()
+    snippet = text[:2000].upper()
     if "CONSOLIDATED" in snippet:
         return "consolidated"
     if "STANDALONE" in snippet:
@@ -118,22 +118,35 @@ def parse_filename(pdf_path: Path) -> tuple[str, str, str, str]:
     quarter_num = int(q_match.group(1)) if q_match else None
 
     # FY year detection (priority order):
-    # 1. Explicit FYyy or FY20yy pattern (e.g. FY24, FY2024)
+    # 0. FY + YYYY-YY range: "FY2024-25" → FY25 (must beat plain fy_match)
+    fy_range_match = re.search(r'fy\s*(\d{4})[_-](\d{2})(?!\d)', name_lower)
+    # 1. Explicit FYyy or FY20yy: "FY24", "FY2024"
     fy_match = re.search(r'fy\s*(\d{2,4})', name_lower)
-    # 2. Indian FY "YYYY_YY" or "YYYY-YY" (e.g. 2022_23 = FY23, ending year)
-    indian_fy_match = re.search(r'(\d{4})[_-](\d{2})\b', name)
-    # 3. Date DD_MM_YYYY or DD.MM.YYYY (e.g. 30_06_2021 = Q1 FY22)
+    # 2. Indian FY "YYYY_YY" / "YYYY-YY" without fy prefix: "2022_23" → FY23
+    #    Use (?!\d) instead of \b so underscores (which are \w) don't block matching.
+    #    Validate: ending year must be (start_year % 100 + 1) and start_year >= 2000.
+    indian_fy_match = re.search(r'(\d{4})[_-](\d{2})(?!\d)', name)
+    # 3. Date DD_MM_YYYY or DD.MM.YYYY: "30_06_2021" → Q1 FY22
     date_match = re.search(r'\b(\d{2})[._-](\d{2})[._-](\d{4})\b', name)
-    # 4. Plain 4-digit year fallback
-    year_match = re.search(r'(\d{4})', name)
+    # 4. 4-digit year not surrounded by other digits: "2022" in "Report_2022.pdf".
+    #    Use negative lookaround on digits (not \b) so "_2017" in filenames still matches
+    #    but "9474" inside a hash like "99cd947489" (adjacent digits on both sides) does not.
+    year_match = re.search(r'(?<![0-9])(\d{4})(?![0-9])', name)
 
     fy_short = "FYunknown"
-    if fy_match:
+    if fy_range_match:
+        # "FY2024-25" → group(2) = "25" → FY25
+        fy_short = f"FY{fy_range_match.group(2)}"
+    elif fy_match:
         raw = fy_match.group(1)
         fy_short = f"FY{raw[-2:]}"
     elif indian_fy_match:
-        # "2022_23" → use the 2-digit ending year → FY23
-        fy_short = f"FY{indian_fy_match.group(2)}"
+        year4 = int(indian_fy_match.group(1))
+        ending = int(indian_fy_match.group(2))
+        expected = (year4 % 100 + 1) % 100
+        # Only accept if the year looks plausible and ending matches YYYY+1 convention
+        if year4 >= 2000 and ending == expected:
+            fy_short = f"FY{indian_fy_match.group(2)}"
     elif date_match:
         day, month, cal_year = int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3))
         # Indian FY starts April: Apr–Dec → FY = cal_year+1; Jan–Mar → FY = cal_year
@@ -144,7 +157,9 @@ def parse_filename(pdf_path: Path) -> tuple[str, str, str, str]:
             quarter_num = q_map.get(month)
     elif year_match:
         year = int(year_match.group(1))
-        fy_short = f"FY{str(year)[-2:]}"
+        # Only accept plausible years (hash suffixes often contain 4-digit non-year sequences)
+        if 2000 <= year <= 2035:
+            fy_short = f"FY{str(year)[-2:]}"
 
     quarter_tag = f"_Q{quarter_num}" if quarter_num else ""
 
