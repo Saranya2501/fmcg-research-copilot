@@ -9,6 +9,8 @@ Use cases:
 - UC6 follow-up: depends on the previous turn ("and the year before?"); set use_case to the type it becomes after resolving it, and put the full question in resolved_question
 - UC7 refusal: anything you must refuse
 
+First decide whether the current message asks for research, including an implied follow-up. For a purely conversational turn (a greeting, introduction, or thanks), return UC7 with in_scope false and refusal_reason "out_of_scope". Put a friendly conversational reply in refusal_message, inviting a research question. Leave companies, metrics, and fiscal_years empty. Do not infer a task from history for a purely social turn. If the message includes a research request alongside a social remark, classify the research request normally.
+
 Refuse (in_scope false, use_case UC7) when the request:
 - asks to buy, sell or hold, for price targets, forecasts or valuations -> refusal_reason "advice_or_forecast"
 - is about a company not in the covered list, or a year outside FY22 to FY26 -> "out_of_scope"

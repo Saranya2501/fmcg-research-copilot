@@ -141,6 +141,26 @@ class LatestP4BridgeTests(unittest.TestCase):
         self.assertEqual(result.metrics['tool_calls'],2)
         self.assertEqual(result.results[-1]['value'],50)
 
+    def test_streamlit_research_greeting_skips_planner(self):
+        from streamlit.testing.v1 import AppTest
+
+        reply = "Hello! What would you like to research?"
+        model = ScriptedModel([{**GATE, "use_case": "UC7", "in_scope": False,
+                                "refusal_reason": "out_of_scope", "refusal_message": reply,
+                                "companies": [], "metrics": [], "fiscal_years": [],
+                                "resolved_question": "hi"}])
+        with patch.object(bridge, "missing_setup", return_value=[]), patch.object(
+            bridge, "load_retrieval", return_value=self.p3
+        ), patch.object(bridge, "_make_client", return_value=model):
+            ui = AppTest.from_file(str(Path(app.__file__))).run()
+            ui.text_input[0].set_value("Test User")
+            ui.button[0].click().run()
+            ui.chat_input[0].set_value("hi").run()
+            self.assertFalse(ui.exception)
+            self.assertEqual(ui.session_state["messages"][-1]["content"], reply)
+            self.assertEqual(len(model.calls), 1)
+            self.assertFalse(self.retrieval_calls)
+
     def test_streamlit_shows_sources_without_technical_labels(self):
         from streamlit.testing.v1 import AppTest
         model=ScriptedModel([GATE,PLAN,QUERY,ANALYST,WRITER,CRITIC])
