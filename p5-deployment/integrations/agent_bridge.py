@@ -254,12 +254,25 @@ def run_agent(question, history, filters, config, *, on_progress=None):
                             'estimated_tokens': (len(chunk.text) + 3) // 4,
                             'preview': chunk.text[:1000]})
                         known.add(chunk.chunk_id)
+            validation_error = None
             with _span(name.removeprefix('run_').replace('_','-'),'agent',{'question':question}) as obs:
-                result=fn(llm,*args,**kwargs)
-                record={'agent':name,'attempts':result.attempts,'repairs':result.repairs,
-                        'validation_errors':len(result.errors),'local_fixes':len(result.local_fixes)}
+                try:
+                    result=fn(llm,*args,**kwargs)
+                except modules['json_utils'].AgentOutputError as exc:
+                    if name != 'run_analyst':
+                        raise
+                    validation_error = exc
+                    record = {'agent': name, 'attempts': len(exc.errors), 'repairs': len(exc.errors) - 1,
+                              'validation_errors': len(exc.errors)}
+                    update_observation(obs, level='ERROR', status_message='Analyst output could not be verified',
+                                       metadata=record)
+                else:
+                    record={'agent':name,'attempts':result.attempts,'repairs':result.repairs,
+                            'validation_errors':len(result.errors),'local_fixes':len(result.local_fixes)}
+                    update_observation(obs,output=result.obj.model_dump(),metadata=record)
                 metrics['json_steps'].append(record)
-                update_observation(obs,output=result.obj.model_dump(),metadata=record)
+            if validation_error is not None:
+                raise validation_error
             if name=='run_gatekeeper' and result.obj.in_scope:
                 gate=result.obj
                 context.update(companies=gate.companies,metrics=gate.metrics,fiscal_years=gate.fiscal_years,use_case=gate.use_case)
@@ -303,6 +316,7 @@ def run_agent(question, history, filters, config, *, on_progress=None):
         schemas, agents = modules['schemas'], modules['agents']
         agent_proxy=SimpleNamespace(**{name:agent_wrapper(name,getattr(agents,name))
             for name in ('run_gatekeeper','run_planner','run_query_writer','run_analyst','run_writer','run_critic')})
+        agent_proxy.AgentOutputError = modules['json_utils'].AgentOutputError
 
         p3=load_retrieval(str(rag_path()))
         client=_make_client(modules['llm_client'])
@@ -339,16 +353,19 @@ def run_agent(question, history, filters, config, *, on_progress=None):
 
 def normalize_response(raw,evidence,context,usage,metrics):
     status=raw.get('status')
+    limitations=raw.get('missing',[])
     if status=='refused':
         return ChatResponse(raw.get('message') or 'This request is outside the supported scope.',
                             status='refused',agent_context=context,usage=usage,metrics=metrics)
     if status!='answered':
         return ChatResponse('I could not verify an answer from the available evidence.',successful=False,status='partial',
-            results=raw.get('results',[]),limitations=['P4 validation incomplete'],agent_context=context,usage=usage,metrics=metrics)
+            results=raw.get('results',[]),limitations=limitations or ['P4 validation incomplete'],
+            agent_context=context,usage=usage,metrics=metrics)
     answer=raw.get('answer') or {}
     if answer.get('refused'):
         return ChatResponse(answer.get('answer') or 'No supported answer was found.',
             status='not_found' if answer.get('refusal_reason')=='not_in_context' else 'refused',
+            results=raw.get('results',[]) if limitations else [],limitations=limitations,
             agent_context=context,usage=usage,metrics=metrics)
     citations=[]
     valid_citations=True
@@ -360,7 +377,6 @@ def normalize_response(raw,evidence,context,usage,metrics):
         citations.append({'document':source.get('doc') or source.get('doc_id') or item.get('doc'),
             'page':source.get('page',item.get('page')),'company':source.get('company'),
             'source_id':item.get('chunk_id')})
-    limitations=raw.get('missing',[])
     complete=(bool(answer.get('answer')) and bool(citations) and valid_citations
               and not limitations and raw.get('critic',{}).get('verdict')=='pass')
     if not complete and not limitations:

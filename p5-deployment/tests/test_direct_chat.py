@@ -128,26 +128,31 @@ class DirectChatTests(unittest.TestCase):
         self.assertFalse(result.successful);self.assertFalse(result.cacheable)
         self.assertNotIn('sensitive',result.answer)
 
-    def test_toggle_new_chat_and_saved_mode(self):
+    def test_saved_direct_chat_and_new_research_chat(self):
         from streamlit.testing.v1 import AppTest
         model=Model()
-        with patch.object(bridge,'_make_client',return_value=model):
+        with patch.dict(os.environ, {'CHAT_RETRIEVAL_ENABLED': 'true'}), \
+             patch('ui.chat.get_redis_client'), \
+             patch.object(bridge,'_make_client',return_value=model):
             ui=AppTest.from_file(str(Path(app.__file__))).run()
             ui.text_input[0].set_value("Test User")
             ui.button[0].click().run()
-            original=ui.session_state['active_conversation_id']
-            ui.toggle[0].set_value(True).run()
-            direct=ui.session_state['active_conversation_id']
-            self.assertNotEqual(original,direct)
+            direct=app.create_conversation('chat', user_session_id=ui.session_state['user_session_id'])
+            app.save_message(direct, 'user', 'Previous question')
+            ui.run()
+            ui.sidebar.button(key='history_'+direct).click().run()
+            self.assertEqual(ui.session_state['active_conversation_id'], direct)
             self.assertFalse(any('Research setup' in w.value for w in ui.warning))
             ui.chat_input[0].set_value('Hello').run()
             self.assertFalse(ui.exception)
             self.assertEqual(ui.session_state['messages'][-1]['content'],'Hello from the model.')
             self.assertTrue(any(c.value=='Tokens · Input: 10 · Output: 5 · Total: 15' for c in ui.caption))
-            ui.toggle[0].set_value(False).run()
+            ui.sidebar.button[0].click().run()
+            self.assertFalse(ui.toggle)
+            self.assertFalse(ui.session_state['direct_chat'])
             self.assertTrue(any('Research setup' in w.value for w in ui.warning))
             ui.sidebar.button(key='history_'+direct).click().run()
-            self.assertTrue(ui.toggle[0].value)
+            self.assertTrue(ui.session_state['direct_chat'])
             self.assertEqual(ui.session_state['active_conversation_id'],direct)
             self.assertFalse(ui.exception)
 

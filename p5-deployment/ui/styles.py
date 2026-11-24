@@ -32,6 +32,13 @@ def apply_chat_styles():
             text-align: left;
             overflow-wrap: anywhere;
         }
+        .st-key-starter_questions button {
+            justify-content: flex-start;
+        }
+        .st-key-starter_questions button,
+        .st-key-starter_questions button p {
+            text-align: left;
+        }
         @media (max-width: 640px) {
             [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]) {
                 max-width: 92%;

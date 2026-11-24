@@ -100,21 +100,12 @@ excluded from Git.
 
 Set `CHAT_RETRIEVAL_ENABLED=false` in `p5-deployment/.env` and restart the app
 to disable retrieval globally. This forces direct model chat, including for saved
-research conversations, and locks the sidebar toggle on. No source files, embedding
-model or reranker are loaded. Model API configuration is still required. The default
-is `true`, which allows the sidebar to select either mode.
+research conversations. No source files, embedding model or reranker are loaded.
+Model API configuration is still required.
 
-Turn on **Chat with model** in the sidebar to skip document retrieval and the P4
-research pipeline. This makes one conversational model call using your configured
-API and recent chat history. The parsed corpus and indexes are not checked or used
-in this mode. Replies are labelled as model chat and have no document citations.
-
-Switching modes starts a fresh conversation without deleting previous chats.
-Reopening a saved conversation restores its mode. Both modes retain session rate
-limits, persistent history, response caching, usage tracking and Langfuse trace
-links. Their cache keys are separate. Recent history is trimmed when necessary to
-fit the model client's token budget. Turning the switch off returns to research,
-which still requires the complete parsed corpus and indexes.
+With the default `CHAT_RETRIEVAL_ENABLED=true`, new chats use the research pipeline
+and require the parsed corpus and indexes. Reopening a saved direct chat restores
+its direct mode and uses the configured model API and recent chat history.
 
 ## Connect your API
 

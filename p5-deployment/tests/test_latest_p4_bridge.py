@@ -141,6 +141,82 @@ class LatestP4BridgeTests(unittest.TestCase):
         self.assertEqual(result.metrics['tool_calls'],2)
         self.assertEqual(result.results[-1]['value'],50)
 
+    def test_unsupported_analyst_output_becomes_a_noncacheable_evidence_gap(self):
+        from streamlit.testing.v1 import AppTest
+
+        analyst = {
+            'values': [{**ANALYST['values'][0], 'label': 'advertisement and promotion spends', 'value': 0.8}],
+            'calculation': {
+                'expression': 'spend / revenue * 100',
+                'variables': {'spend': 'advertisement and promotion spends', 'revenue': 'revenue from operations'},
+                'result_unit': '%',
+            },
+        }
+        model = ScriptedModel([GATE, PLAN, QUERY, analyst, analyst, analyst])
+        with patch.object(bridge, 'missing_setup', return_value=[]), patch.object(
+            bridge, 'load_retrieval', return_value=self.p3
+        ), patch.object(bridge, '_make_client', return_value=model):
+            ui = AppTest.from_file(str(Path(app.__file__))).run()
+            ui.text_input[0].set_value('Test User')
+            ui.button[0].click().run()
+            ui.chat_input[0].set_value(GATE['resolved_question']).run()
+
+        self.assertFalse(ui.exception)
+        message = ui.session_state['messages'][-1]
+        result = message['response']
+        self.assertEqual(result['status'], 'partial')
+        self.assertFalse(result['cacheable'])
+        self.assertEqual(len(model.calls), 6)
+        self.assertEqual(result['metrics']['tool_calls'], 1)
+        self.assertEqual([row['value'] for row in result['results']], [None])
+        self.assertIn('could not verify an answer', message['content'])
+        self.assertTrue(any('could not verify the required figures' in caption.value for caption in ui.caption))
+        repair_prompt = model.calls[-1][0][-1]['content']
+        self.assertIn('value 0.8', repair_prompt)
+        self.assertIn("variable 'revenue'", repair_prompt)
+
+    def test_missing_analyst_input_keeps_grounded_results_and_reports_the_gap(self):
+        analyst = {**ANALYST, 'missing': ['advertisement and promotion spends']}
+        model = ScriptedModel([GATE, PLAN, QUERY, analyst, WRITER, CRITIC])
+        result = self.execute(model)
+
+        self.assertEqual(result.status, 'partial')
+        self.assertFalse(result.cacheable)
+        self.assertIn('advertisement and promotion spends', result.limitations[0])
+        self.assertEqual([row['value'] for row in result.results], [None, 100])
+        self.assertIn('advertisement and promotion spends', model.calls[-2][0][-1]['content'])
+
+    def test_advertising_lookup_selects_consolidated_expense_note(self):
+        note = {**ROWS[0], 'chunk_id': 'expense-note', 'page': 200,
+                'text': 'Advertising and promotion 6,489 4,907',
+                'standalone_consolidated': 'consolidated'}
+        standalone_note = {**note, 'chunk_id': 'standalone-note', 'page': 158,
+                           'text': 'Advertising and promotion 6,380 4,859',
+                           'standalone_consolidated': 'standalone'}
+        distractors = [{**ROWS[0], 'chunk_id': f'distractor-{i}'} for i in range(5)]
+
+        def retrieve(query, **kwargs):
+            return [standalone_note, note] if query == 'advertising and promotion other expenses' else distractors
+
+        self.p3.retrieve = retrieve
+        question = "What were HUL's advertising expenses in FY24?"
+        gate = {**GATE, 'resolved_question': question}
+        plan = {**PLAN, 'subtasks': [{**PLAN['subtasks'][0], 'metric': 'advertising expenses', 'question': question}]}
+        analyst = {'values': [{**ANALYST['values'][0], 'label': 'advertising and promotion', 'value': 6489,
+                               'chunk_id': 'expense-note', 'quote': 'Advertising and promotion 6,489'}]}
+        writer = {**WRITER, 'answer': 'HUL reported 6489 crore [expense-note].', 'value': 6489,
+                  'citations': [{'chunk_id': 'expense-note'}]}
+        model = ScriptedModel([gate, plan, QUERY, analyst, writer, CRITIC])
+        result = self.execute(model)
+
+        self.assertEqual(result.status, 'answered')
+        self.assertEqual(result.citations[0]['page'], 200)
+        self.assertEqual(result.results[0]['chunk_ids'], ['expense-note'])
+        self.assertEqual(result.metrics['tool_calls'], 1)
+        self.assertIn('expense-note', model.calls[3][0][-1]['content'])
+        self.assertNotIn('distractor-0', model.calls[3][0][-1]['content'])
+        self.assertNotIn('standalone-note', model.calls[3][0][-1]['content'])
+
     def test_streamlit_research_greeting_skips_planner(self):
         from streamlit.testing.v1 import AppTest
 

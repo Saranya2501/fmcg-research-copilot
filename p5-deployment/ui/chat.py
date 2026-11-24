@@ -12,11 +12,16 @@ from chat.rate_limit import check_rate_limit
 from chat.chat_service import process_chat_turn
 from ui.session import require_user_session
 from ui.sidebar import render_sidebar
-from ui.messages import render_messages
+from ui.messages import render_messages, render_working_timer
 from ui.styles import apply_chat_styles
 from storage.redis_connection import get_redis_client
 
 logger = logging.getLogger(__name__)
+
+STARTER_QUESTIONS = (
+    "What was ITC's FMCG segment revenue in FY24?",
+    "What did HUL report about urban versus rural demand in FY24?",
+)
 
 
 def main() -> None:
@@ -42,8 +47,7 @@ def main() -> None:
     if 'direct_chat' not in st.session_state:
         st.session_state.direct_chat = conversation_mode(st.session_state.active_conversation_id) == 'chat'
     try:
-        allow_retrieval = retrieval_enabled()
-        if not allow_retrieval:
+        if not retrieval_enabled():
             st.session_state.direct_chat = True
         limit = positive_setting("CHAT_RATE_LIMIT", 5)
         window = positive_setting("CHAT_RATE_WINDOW_SECONDS", 60)
@@ -58,7 +62,7 @@ def main() -> None:
         st.error(f"Invalid chat configuration: {exc}")
         st.stop()
 
-    render_sidebar(user_session_id, user_name, allow_retrieval)
+    render_sidebar(user_session_id, user_name)
 
     st.session_state.messages = load_messages(st.session_state.active_conversation_id)
 
@@ -76,16 +80,22 @@ def main() -> None:
                 for item in missing:
                     st.write(item)
 
+    suggestions = None
+    suggested_question = None
     if not st.session_state.messages:
-        with st.chat_message("assistant"):
-            st.markdown(
-                "What would you like to talk about?" if st.session_state.direct_chat else
-                "What would you like to research?\n\nFor example: What were HUL's advertising expenses in FY24?"
-            )
+        suggestions = st.empty()
+        with suggestions.container(key="starter_questions"):
+            for starter in STARTER_QUESTIONS:
+                if st.button(starter, width="stretch", wrap=True):
+                    suggested_question = starter
 
     render_messages(st.session_state.messages)
 
-    question = st.chat_input('Message your model…' if st.session_state.direct_chat else "Ask about a company, financial year, or competitor…", max_chars=5000)
+    placeholder = (
+        "Message your model…" if st.session_state.direct_chat
+        else "Ask about a company, financial year, or competitor…"
+    )
+    question = st.chat_input(placeholder, max_chars=5000) or suggested_question
     if question and question.strip():
         timestamps, retry_after = check_rate_limit(
             st.session_state.request_timestamps, time.monotonic(), limit, window
@@ -94,12 +104,15 @@ def main() -> None:
         if retry_after:
             st.warning(f"Message limit reached. Try again in {retry_after} seconds.")
             return
+        if suggestions is not None:
+            suggestions.empty()
         question = question.strip()
         with st.chat_message("user"):
             st.markdown(question)
 
         with st.chat_message("assistant"):
             output = st.empty()
+            render_working_timer()
             def show_stream(text):
                 output.markdown(text + " ▌" if text else "Thinking…")
             with st.spinner("Thinking…") if st.session_state.direct_chat else nullcontext():

@@ -2,6 +2,7 @@
 
 import streamlit as st
 
+from chat.chat_settings import retrieval_enabled
 from storage.history_repository import create_user_session, create_conversation, require_conversation_owner, find_user_session
 
 def require_user_session():
@@ -31,10 +32,12 @@ def require_user_session():
     st.stop()
 
 
-def start_mode_conversation():
-    st.session_state.active_conversation_id=create_conversation(
-        'chat' if st.session_state.direct_chat else 'research',
-        user_session_id=st.session_state.user_session_id)
+def start_new_conversation():
+    direct_chat = not retrieval_enabled()
+    st.session_state.active_conversation_id = create_conversation(
+        'chat' if direct_chat else 'research', user_session_id=st.session_state.user_session_id
+    )
+    st.session_state.direct_chat = direct_chat
     st.query_params["chat"] = st.session_state.active_conversation_id
 
 
