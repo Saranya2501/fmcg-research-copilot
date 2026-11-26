@@ -2,11 +2,51 @@
 
 Owner: Irfan
 
-Owns Langfuse tracing integration, the evaluation runner with trace output, Streamlit entry point, and Docker configuration.
+Owns Langfuse tracing integration, the Streamlit entry point, and Docker
+configuration. Tracing hooks support evaluation runs; an end-to-end scoring
+runner and machine-readable final evaluation results are not included in the
+current repository. See [P1 evaluation material](../p1-eval/README.md).
+
+## Required data and credentials
+
+Download both the indexes and full parsed chunks from the
+[shared Drive folder](https://drive.google.com/drive/folders/1-WKMvaOx8v3jJAcwN_jSKkMa3AHC1OR-).
+From the repository root, the default app requires:
+
+```text
+p4-agent/p3_retrieval/index/bm25.pkl
+p4-agent/p3_retrieval/index/faiss.index
+p4-agent/p3_retrieval/index/chunk_ids.json
+p4-agent/p3_retrieval/parsed/all_chunks.jsonl
+```
+
+Use all four files from the same rebuild. The tracked retrieval source is already
+included; the chunk sample cannot substitute for the full corpus. The original
+source PDFs are not needed to query an existing complete bundle.
+
+Create `p5-deployment/.env` from `.env.example` and configure a model before
+starting. For IITK use the [institute API instructions](#iitk-institute-api).
+Authorized API credentials and CA certificates are supplied separately; public
+code and data do not grant endpoint access. Never put API keys in Git or the
+public submission folder. Langfuse credentials are optional for answering, but
+are required to export real query traces.
 
 ## Run with Docker
 
-Install and start Docker Desktop, then run from the repository root:
+Install and start Docker Desktop. Download the data and configure
+`p5-deployment/.env` first. For IITK certificates, place the LLM and embedding CA
+files in `p5-deployment/certs/` on the host. Compose mounts that directory at
+`/app/p5-deployment/certs/` inside the container. Set certificate values in `.env`
+to the container paths, for example:
+
+```dotenv
+LLM_CA_CERT=/app/p5-deployment/certs/llm-ca.crt
+CACERT_PATH=/app/p5-deployment/certs/vm02-ca.crt
+```
+
+Use the actual supplied filenames (the LLM filename above is illustrative).
+Host paths such as `/Users/...` do not resolve inside the container. Then run
+from the repository root:
 
 ```bash
 docker compose -f p5-deployment/docker-compose.yml up --build -d
@@ -48,13 +88,60 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r p5-deployment/requirements.txt
 cp p5-deployment/.env.example p5-deployment/.env
-streamlit run p5-deployment/app.py
+# Configure .env and download the data before the next command.
+python -m streamlit run p5-deployment/app.py
 ```
 
-Edit `p5-deployment/.env` to configure rate limits, the optional history path, and
-Langfuse credentials. The app loads this file automatically; existing environment
+Edit `p5-deployment/.env` to configure the model, rate limits, the optional history
+path, and Langfuse credentials. The filename must be `.env`, not `env`. The app
+loads this file automatically; existing environment
 variables take priority. Restart Streamlit after changing configuration. `.env` is
 excluded from Git.
+
+## IITK institute API
+
+For the full app, keep both LLM and embedding settings in
+`p5-deployment/.env`. The separate `p3-retrieval/.env` is for standalone P3 usage.
+Replace every placeholder below with the values assigned by IITK:
+
+```dotenv
+LLM_BASE_URL=
+LLM_TARGET=api
+LLM_API_BASE_URL=https://YOUR-IITK-HOST:PORT/v1
+LLM_API_KEY=YOUR_AUTHORIZED_LLM_KEY
+LLM_MODEL=Qwen/Qwen3-8B
+LLM_CA_CERT=/absolute/path/to/the/supplied/llm-ca.crt
+
+# Optional remote query embeddings; these use separate access credentials.
+IITK_EMBED_URL=https://103.42.50.41:1035/v1/embeddings
+IITK_EMBED_KEY=YOUR_AUTHORIZED_EMBEDDING_KEY
+CACERT_PATH=/absolute/path/to/the/supplied/vm02-ca.crt
+```
+
+Leave `LLM_BASE_URL` empty: a nonempty value selects the generic compatible
+connection instead of institute mode. That generic mode reads `LLM_TLS_CA_CERT`,
+not `LLM_CA_CERT`. Use the API base URL ending in `/v1`, without appending
+`/chat/completions`. Confirm the LLM port and certificate with the endpoint
+owner; the embedding CA is not automatically valid for the LLM endpoint.
+
+For local runs, absolute certificate paths must point to existing files on your
+machine. For Docker, use the mounted container paths documented above. Keep the
+example's cache/log/lock paths from `.env.example`, and run from the repository
+root. Existing exported environment variables take precedence over `.env`;
+restart Streamlit after configuration changes.
+
+Remote embeddings are optional. When the embedding URL/key are absent, P3 uses
+the local `BAAI/bge-small-en-v1.5` model. The `BAAI/bge-reranker-base` reranker
+always loads locally in this implementation. First use may download model
+weights; allow network access and startup time. An embedding API failure also
+triggers local embedding fallback.
+
+If the app reports a research failure, check the selected provider/model and
+`p5-deployment/data/logs/llm_calls.jsonl`. `target=local` means an Ollama connection
+was selected. `CERTIFICATE_VERIFY_FAILED` means the endpoint's certificate chain
+could not be verified with the configured CA. The generic P4 failure message
+intentionally hides raw exception details. Passing offline tests does not verify
+live endpoint availability; confirm a real cited answer and its trace separately.
 
 ## Connect your API
 
@@ -168,9 +255,9 @@ Retrieval defaults to `p4-agent/p3_retrieval` inside the supplied P4 package;
 override with `P3_RAG_PATH`. The separate top-level `p3-retrieval` folder is not
 used by P5's default configuration, dependencies, or container.
 It must contain `retrieve.py`, `index/bm25.pkl`, `index/faiss.index`,
-`index/chunk_ids.json`, and `parsed/all_chunks.jsonl`. The supplied index files
-have been extracted from `index_bundle.zip` into P4's `index/`. A chunk sample is not a
-replacement for the full parsed corpus.
+`index/chunk_ids.json`, and `parsed/all_chunks.jsonl`. Download and extract the
+indexes and parsed chunks from the shared Drive folder into this layout. A chunk
+sample is not a replacement for the full parsed corpus.
 
 The adapter injects the saved conversation history and last company/metric/year
 context into P2's gatekeeper, then saves the new resolved context with the answer.
@@ -224,9 +311,9 @@ public deployment across sessions or servers.
 - `docker-compose.yml` — app service available locally on port 8501
 - `../.dockerignore` — excludes credentials and generated data from the build context
 
-## Next integration steps
+## Live-run verification
 
-Supply the full P3 parsed corpus and choose a configured Ollama or institute API
-target. Docker mounts the P3 index and parsed corpus read-only; configure certificate
+Install the complete matching data bundle from Drive and configure an Ollama,
+institute API, or compatible-provider target. Docker mounts the P3 index and parsed corpus read-only; configure certificate
 paths inside the container and use `host.docker.internal` for Ollama on a Mac host.
 Then verify real research answers before running the approved gold evaluation set.
