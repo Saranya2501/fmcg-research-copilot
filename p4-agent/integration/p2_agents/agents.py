@@ -64,7 +64,7 @@ def format_evidence(chunks: list[Chunk]) -> str:
     """Render chunks as numbered EVIDENCE blocks inside the token budget."""
     out, used = [], 0
     for c in chunks[:MAX_EVIDENCE_CHUNKS]:
-        meta = ", ".join(x for x in [c.company, c.fiscal_year, c.quarter, c.doc_type,
+        meta = ", ".join(x for x in [c.company, c.fiscal_year, c.quarter, c.doc_type, c.standalone_consolidated,
                                      f"{c.doc} p.{c.page}" if c.page else c.doc, c.section] if x)
         text = c.text[:MAX_CHUNK_CHARS]
         block = f"[{c.chunk_id}] ({meta})\n{text}"

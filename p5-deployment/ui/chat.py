@@ -1,13 +1,12 @@
 """Streamlit chat view and interaction flow."""
 
-from contextlib import nullcontext
 import logging
 import time
 
 import streamlit as st
 
-from storage.history_repository import create_conversation, load_messages, find_resume_conversation, conversation_mode
-from chat.chat_settings import positive_setting, retrieval_enabled, response_config
+from storage.history_repository import create_conversation, load_messages, find_resume_conversation
+from chat.chat_settings import positive_setting, response_config
 from chat.rate_limit import check_rate_limit
 from chat.chat_service import process_chat_turn
 from ui.session import require_user_session
@@ -44,19 +43,11 @@ def main() -> None:
     save_browser_session(user_session_id, st.session_state.active_conversation_id)
     if "request_timestamps" not in st.session_state:
         st.session_state.request_timestamps = []
-    if 'direct_chat' not in st.session_state:
-        st.session_state.direct_chat = conversation_mode(st.session_state.active_conversation_id) == 'chat'
     try:
-        if not retrieval_enabled():
-            st.session_state.direct_chat = True
         limit = positive_setting("CHAT_RATE_LIMIT", 5)
         window = positive_setting("CHAT_RATE_WINDOW_SECONDS", 60)
         positive_setting("CHAT_CACHE_TTL_SECONDS", 3600)
-        if st.session_state.direct_chat:
-            from integrations.agent_bridge import configuration
-            configuration(direct=True)
-        else:
-            response_config()
+        config = response_config()
     except (ValueError, OSError, ImportError) as exc:
         logger.exception("Invalid chat configuration.")
         st.error(f"Invalid chat configuration: {exc}")
@@ -67,11 +58,7 @@ def main() -> None:
     st.session_state.messages = load_messages(st.session_state.active_conversation_id)
 
     st.title("FMCG Research Copilot")
-    if st.session_state.direct_chat:
-        from integrations.api_connection import connection
-        if connection().missing():
-            st.warning('Set up your API key, base URL and model ID to start chatting.')
-    elif response_config()["backend"] == "agent":
+    if config["backend"] == "agent":
         from integrations.agent_bridge import missing_setup
         missing = missing_setup()
         if missing:
@@ -91,11 +78,7 @@ def main() -> None:
 
     render_messages(st.session_state.messages)
 
-    placeholder = (
-        "Message your model…" if st.session_state.direct_chat
-        else "Ask about a company, financial year, or competitor…"
-    )
-    question = st.chat_input(placeholder, max_chars=5000) or suggested_question
+    question = st.chat_input("Ask about a company, financial year, or competitor…", max_chars=5000) or suggested_question
     if question and question.strip():
         timestamps, retry_after = check_rate_limit(
             st.session_state.request_timestamps, time.monotonic(), limit, window
@@ -113,12 +96,8 @@ def main() -> None:
         with st.chat_message("assistant"):
             output = st.empty()
             render_working_timer()
-            def show_stream(text):
-                output.markdown(text + " ▌" if text else "Thinking…")
-            with st.spinner("Thinking…") if st.session_state.direct_chat else nullcontext():
-                process_chat_turn(question, st.session_state.active_conversation_id,
-                    mode='chat' if st.session_state.direct_chat else 'research',
-                    on_text=show_stream if st.session_state.direct_chat else None,
-                    on_progress=None if st.session_state.direct_chat else output.caption,
-                    user_session_id=user_session_id)
+            process_chat_turn(
+                question, st.session_state.active_conversation_id,
+                on_progress=output.caption, user_session_id=user_session_id,
+            )
         st.rerun()

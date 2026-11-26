@@ -10,17 +10,7 @@ def positive_setting(name: str, default: int) -> int:
     return value
 
 
-def retrieval_enabled() -> bool:
-    value = os.getenv("CHAT_RETRIEVAL_ENABLED", "true").strip().lower()
-    if value not in ("true", "false"):
-        raise ValueError("CHAT_RETRIEVAL_ENABLED must be true or false")
-    return value == "true"
-
-
 def response_config() -> dict:
-    if not retrieval_enabled():
-        from integrations.agent_bridge import configuration
-        return configuration(direct=True)
     backend = os.getenv("CHAT_BACKEND", "agent")
     if backend == "agent":
         from integrations.agent_bridge import configuration

@@ -126,7 +126,7 @@ class UserSessionTests(unittest.TestCase):
     def test_cached_usage_does_not_inflate_totals(self):
         session = app.create_user_session('Sam')
         fresh, cached = [app.create_conversation(user_session_id=session) for _ in range(2)]
-        config = {'backend': 'chat'}
+        config = {'backend': 'agent'}
         result = ChatResponse('Answer', cacheable=True,
             usage={'prompt_tokens': 10, 'completion_tokens': 5, 'total_tokens': 15})
         with patch.object(chat_service, 'response_config', return_value=config), patch.object(chat_service, 'generate_response', return_value=result) as generate:

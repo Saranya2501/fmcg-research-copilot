@@ -7,8 +7,6 @@
 **/.env.*
 **/certs
 Corpus
-p3-retrieval/index
-p3-retrieval/parsed
 p5-deployment/data
 .DS_Store
 **/index_bundle.zip

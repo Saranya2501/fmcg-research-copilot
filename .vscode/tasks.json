@@ -1,0 +1,11 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Satrt server",
+            "type": "shell",
+            "command": ".venv/bin/python -m streamlit run p5-deployment/app.py",
+            "inAgents": true
+        }
+    ]
+}

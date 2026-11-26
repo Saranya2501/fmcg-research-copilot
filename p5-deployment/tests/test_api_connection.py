@@ -21,8 +21,7 @@ class ConnectionTests(unittest.TestCase):
         root=Path(self.folder.name)
         self.settings=patch.dict(os.environ,{
             'LLM_BASE_URL':'https://api.groq.com/openai/v1','LLM_API_KEY':'fake-test-key',
-            'LLM_MODEL':'test-model','LLM_JSON_MODE':'true','LLM_TLS_CA_CERT':'',
-            'LLM_TARGET':'local','LLM_CA_CERT':'/does-not-exist/institute.crt',
+            'LLM_MODEL':'test-model','LLM_JSON_MODE':'true','LLM_CA_CERT':'',
             'LLM_CACHE':'1','LLM_LOG_PATH':str(root/'calls.jsonl'),
             'LLM_CACHE_PATH':str(root/'cache.sqlite'),'LLM_LOCK_PATH':str(root/'api.lock'),
         })
@@ -50,19 +49,17 @@ class ConnectionTests(unittest.TestCase):
         with patch.object(agent_bridge,'get_tracing_client',return_value=None),patch('openai.OpenAI',side_effect=self.factory):
             return agent_bridge._make_client(modules['llm_client'])
 
-    def test_p2_names_use_certificate_and_model_api(self):
+    def test_institute_endpoint_uses_same_variables_with_certificate(self):
         import ssl
         cert = Path(ssl.get_default_verify_paths().cafile)
         with patch.dict(os.environ, {
-            'IITK_API_BASE': 'https://institute.invalid/v1',
-            'IITK_API_KEY': 'institute-test-key',
-            'LLM_TLS_CA_CERT': str(cert), 'LLM_MODEL': '',
+            'LLM_BASE_URL': 'https://institute.invalid/v1',
+            'LLM_API_KEY': 'institute-test-key',
+            'LLM_CA_CERT': str(cert), 'LLM_MODEL': 'Qwen/Qwen3-8B',
         }):
             settings = api_connection.connection()
             self.assertEqual(settings.base_url, 'https://institute.invalid/v1')
             self.assertEqual(settings.tls_ca, str(cert))
-            self.assertEqual(settings.model, 'Qwen/Qwen3-8B')
-            self.assertEqual(settings.api_key, 'institute-test-key')
             client = self.make()
             try:
                 client.chat([{'role': 'user', 'content': 'Hello'}])
@@ -73,9 +70,8 @@ class ConnectionTests(unittest.TestCase):
             finally:
                 agent_bridge._close_client(client)
 
-    def test_three_settings_activate_compatible_mode_without_certificate(self):
+    def test_three_settings_are_enough_without_certificate(self):
         settings=api_connection.connection()
-        self.assertEqual(settings.mode,'compatible')
         self.assertEqual(settings.missing(),[])
         self.assertNotIn('fake-test-key',repr(settings))
         self.assertEqual(agent_bridge.configuration()['provider'],'compatible')
@@ -120,15 +116,11 @@ class ConnectionTests(unittest.TestCase):
             with self.subTest(value=value),patch.dict(os.environ,{'LLM_BASE_URL':value}):
                 with self.assertRaises(ValueError): api_connection.connection()
 
-    def test_local_and_institute_modes_remain_available(self):
-        with patch.dict(os.environ,{'LLM_BASE_URL':'','LLM_TARGET':'local'}):
-            self.assertEqual(api_connection.connection().mode,'local')
-        with patch.dict(os.environ,{'LLM_BASE_URL':'','LLM_TARGET':'api','LLM_API_BASE_URL':'https://institute.invalid/v1'}):
-            settings=api_connection.connection()
-            self.assertEqual(settings.mode,'api')
-            self.assertIn('valid LLM_CA_CERT file',settings.missing())
-        with patch.dict(os.environ,{'LLM_BASE_URL':'','LLM_TARGET':'api','LLM_MODEL':''}):
-            self.assertEqual(api_connection.connection().model,'Qwen/Qwen3-8B')
+    def test_removed_variables_are_ignored_and_missing_certificate_is_rejected(self):
+        with patch.dict(os.environ,{'LLM_BASE_URL':'','IITK_API_BASE':'https://x.invalid/v1','LLM_TARGET':'local'}):
+            self.assertEqual(api_connection.connection().missing(),['LLM_BASE_URL'])
+        with patch.dict(os.environ,{'LLM_CA_CERT':'/does-not-exist/ca.crt'}):
+            with self.assertRaises(ValueError): api_connection.connection()
 
     def test_cache_namespace_changes_for_endpoint_model_and_json_mode(self):
         original=agent_bridge.configuration()

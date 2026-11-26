@@ -10,13 +10,6 @@ venv/
 certs/
 !certs/.gitkeep
 
-# Large generated files — share via Google Drive
-p3-retrieval/index
-p3-retrieval/index/
-p3-retrieval/parsed
-p3-retrieval/parsed/
-# p3-retrieval/eval/chunks_sample_p2.jsonl  # tracked in git
-
 # Corpus PDFs — too large for git
 Corpus/
 

@@ -22,6 +22,7 @@ import httpx
 import numpy as np
 from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
+from p4.config import COMPANIES
 
 load_dotenv()
 warnings.filterwarnings("ignore")
@@ -45,6 +46,11 @@ RERANK_MODEL = "BAAI/bge-reranker-base"
 BM25_CANDIDATES = 20
 DENSE_CANDIDATES = 20
 DATA_DELIMITER_OPEN = "<<DATA>>"
+COMPANY_KEYS = {
+    name.casefold(): key
+    for key, company in COMPANIES.items()
+    for name in (key, company["canonical"], *company["aliases"])
+}
 DATA_DELIMITER_CLOSE = "<<END DATA>>"
 
 
@@ -120,7 +126,8 @@ def _load_models():
         _embedder = SentenceTransformer(EMBED_MODEL)
     if reranker_enabled() and _reranker is None:
         _, CrossEncoder = _local_model_classes()
-        _reranker = CrossEncoder(RERANK_MODEL)
+        device = os.getenv("RAG_RERANKER_DEVICE", "").strip() or None
+        _reranker = CrossEncoder(RERANK_MODEL, device=device)
 
 
 def _load_index():
@@ -157,18 +164,28 @@ def _tokenize(text: str) -> list[str]:
     return re.sub(r"[^\w\s]", " ", text.lower()).split()
 
 
+def _company_key(value: str) -> str:
+    name = " ".join(value.casefold().split())
+    name = re.sub(r"\s+(?:limited|ltd\.?)$", "", name)
+    return COMPANY_KEYS.get(name, name)
+
+
 def _apply_filters(chunk_ids: list[str], filters: dict) -> list[str]:
     """Filter chunk IDs by metadata fields."""
     if not filters or not _chunk_map:
         return chunk_ids
+    company = _company_key(str(filters["company"])) if "company" in filters else None
+    metadata = {key: str(value).lower() for key, value in filters.items() if key != "company"}
     result = []
     for cid in chunk_ids:
         chunk = _chunk_map.get(cid)
         if not chunk:
             continue
+        if company is not None and _company_key(chunk.get("company", "")) != company:
+            continue
         match = all(
-            chunk.get(k, "").lower() == str(v).lower()
-            for k, v in filters.items()
+            chunk.get(key, "").lower() == value
+            for key, value in metadata.items()
         )
         if match:
             result.append(cid)

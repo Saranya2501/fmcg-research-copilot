@@ -12,6 +12,21 @@ from integrations import agent_bridge
 
 
 class P4RetrievalSelectionTests(unittest.TestCase):
+    def test_company_aliases_match_corpus_labels_and_preserve_year_filter(self):
+        retrieval = agent_bridge.load_retrieval(agent_bridge.P4_ROOT / 'p3_retrieval')
+        chunks = {
+            'hul24': {'company': 'HUL', 'fiscal_year': 'FY24'},
+            'hul23': {'company': 'HUL', 'fiscal_year': 'FY23'},
+            'dabur24': {'company': 'Dabur', 'fiscal_year': 'FY24'},
+        }
+        with patch.object(retrieval, '_chunk_map', chunks):
+            for company in ('HUL', 'Hindustan Unilever', 'Hindustan Unilever Limited'):
+                with self.subTest(company=company):
+                    self.assertEqual(
+                        retrieval._apply_filters(list(chunks), {'company': company, 'fiscal_year': 'FY24'}),
+                        ['hul24'],
+                    )
+
     def test_default_is_p4_bundled_retrieval(self):
         with patch.dict(os.environ,{'P3_RAG_PATH':''}):
             self.assertEqual(agent_bridge.rag_path(),(agent_bridge.P4_ROOT/'p3_retrieval').resolve())
@@ -46,7 +61,7 @@ class P4RetrievalSelectionTests(unittest.TestCase):
                 file=root/relative
                 file.parent.mkdir(exist_ok=True)
                 file.touch()
-            with patch.dict(os.environ,{'P3_RAG_PATH':directory,'LLM_TARGET':'local','LLM_BASE_URL':''}):
+            with patch.dict(os.environ,{'P3_RAG_PATH':directory,'LLM_BASE_URL':''}):
                 self.assertEqual(agent_bridge.rag_path(),root.resolve())
                 self.assertIn('parsed/all_chunks.jsonl',agent_bridge.missing_setup())
                 (root/'parsed').mkdir()

@@ -1,4 +1,4 @@
-"""Simple configuration for OpenAI-compatible Chat Completions providers."""
+"""Single LLM configuration for an OpenAI-compatible Chat Completions endpoint."""
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
@@ -11,7 +11,6 @@ import httpx
 
 @dataclass(frozen=True)
 class Connection:
-    mode: str
     base_url: str
     model: str
     api_key: str = field(default='',repr=False)
@@ -19,40 +18,25 @@ class Connection:
     tls_ca: str = ''
 
     def missing(self):
-        if self.mode=='compatible':
-            return [name for name,value in (('LLM_BASE_URL',self.base_url),('LLM_API_KEY',self.api_key),('LLM_MODEL',self.model)) if not value]
-        if self.mode=='api':
-            missing=[name for name,value in (('LLM_API_BASE_URL',self.base_url),('LLM_API_KEY',self.api_key),('LLM_CA_CERT',self.tls_ca)) if not value]
-            if self.tls_ca and not Path(self.tls_ca).expanduser().is_file(): missing.append('valid LLM_CA_CERT file')
-            return missing
-        return []
+        return [name for name,value in (('LLM_BASE_URL',self.base_url),('LLM_API_KEY',self.api_key),('LLM_MODEL',self.model)) if not value]
 
 
 def connection():
-    base=(os.getenv('IITK_API_BASE', '').strip() or os.getenv('LLM_BASE_URL', '').strip()).rstrip('/')
-    institute = bool(os.getenv('IITK_API_BASE', '').strip())
-    target=os.getenv('LLM_TARGET','local').strip().lower()
-    if base or target=='compatible':
-        if base:
-            parsed=urlsplit(base)
-            if parsed.scheme not in ('https','http') or not parsed.hostname:
-                raise ValueError('LLM_BASE_URL must be an HTTP or HTTPS API base URL')
-            if parsed.username or parsed.password or parsed.query or parsed.fragment:
-                raise ValueError('Use a plain API base URL and put credentials only in LLM_API_KEY')
-            if parsed.path.rstrip('/').endswith('/chat/completions'):
-                raise ValueError('Use the API base URL, without /chat/completions')
-        json_mode=os.getenv('LLM_JSON_MODE','true').lower().strip()
-        if json_mode not in ('true','false'): raise ValueError('LLM_JSON_MODE must be true or false')
-        ca=(os.getenv('LLM_TLS_CA_CERT', '').strip() or
-            (os.getenv('LLM_CA_CERT', '').strip() if institute else ''))
-        if ca and not Path(ca).expanduser().is_file(): raise ValueError('LLM_TLS_CA_CERT file does not exist')
-        return Connection('compatible',base,(os.getenv('LLM_MODEL', '').strip() or ('Qwen/Qwen3-8B' if institute else '')),
-                          (os.getenv('IITK_API_KEY', '').strip() if institute else '') or os.getenv('LLM_API_KEY', '').strip(),json_mode=='true',ca)
-    if target=='api':
-        return Connection('api',os.getenv('LLM_API_BASE_URL','').strip(),os.getenv('LLM_MODEL','').strip() or 'Qwen/Qwen3-8B',
-                          os.getenv('LLM_API_KEY',''),tls_ca=os.getenv('LLM_CA_CERT',''))
-    if target!='local': raise ValueError('Set LLM_BASE_URL for your provider, or use LLM_TARGET=local/api')
-    return Connection('local',os.getenv('LLM_LOCAL_BASE_URL','http://localhost:11434/v1'),os.getenv('LLM_LOCAL_MODEL','qwen3:8b'))
+    """Read the single LLM_* settings group: LLM_BASE_URL, LLM_API_KEY, LLM_MODEL (+ optional LLM_CA_CERT, LLM_JSON_MODE)."""
+    base=os.getenv('LLM_BASE_URL','').strip().rstrip('/')
+    if base:
+        parsed=urlsplit(base)
+        if parsed.scheme not in ('https','http') or not parsed.hostname:
+            raise ValueError('LLM_BASE_URL must be an HTTP or HTTPS API base URL')
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError('Use a plain API base URL and put credentials only in LLM_API_KEY')
+        if parsed.path.rstrip('/').endswith('/chat/completions'):
+            raise ValueError('Use the API base URL, without /chat/completions')
+    json_mode=os.getenv('LLM_JSON_MODE','true').lower().strip()
+    if json_mode not in ('true','false'): raise ValueError('LLM_JSON_MODE must be true or false')
+    ca=os.getenv('LLM_CA_CERT','').strip()
+    if ca and not Path(ca).expanduser().is_file(): raise ValueError('LLM_CA_CERT file does not exist')
+    return Connection(base,os.getenv('LLM_MODEL','').strip(),os.getenv('LLM_API_KEY','').strip(),json_mode=='true',ca)
 
 
 def compatible_client(module, openai_class, settings):

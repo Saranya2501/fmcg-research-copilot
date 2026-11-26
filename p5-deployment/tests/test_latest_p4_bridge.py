@@ -76,6 +76,60 @@ class LatestP4BridgeTests(unittest.TestCase):
         self.assertTrue(any(m['content']=='Previous answer' for m in model.calls[0][0]))
         self.assertIn('FY25',model.calls[0][0][-1]['content'])
 
+    def test_saved_direct_conversation_continues_through_research(self):
+        from streamlit.testing.v1 import AppTest
+
+        session = app.create_user_session('Test User')
+        conversation = app.create_conversation(user_session_id=session)
+        with app.history_db() as db:
+            db.execute("UPDATE conversations SET mode='chat' WHERE id=?", (conversation,))
+        app.save_message(conversation, 'user', 'Previous question')
+        app.save_message(conversation, 'assistant', 'Previous answer')
+        model = ScriptedModel([GATE, PLAN, QUERY, ANALYST, WRITER, CRITIC])
+        ui = AppTest.from_file(str(Path(app.__file__)))
+        ui.query_params.update({'session': session, 'chat': conversation})
+        with patch.dict(os.environ, {'CHAT_RETRIEVAL_ENABLED': 'false'}), patch.object(
+            bridge, 'missing_setup', return_value=[]
+        ), patch.object(bridge, 'load_retrieval', return_value=self.p3), patch.object(
+            bridge, '_make_client', return_value=model
+        ):
+            ui.run()
+            ui.chat_input[0].set_value(GATE['resolved_question']).run()
+
+        self.assertFalse(ui.exception)
+        messages = app.load_messages(conversation)
+        self.assertEqual(messages[1]['content'], 'Previous answer')
+        self.assertEqual(messages[-1]['response']['status'], 'answered')
+        self.assertEqual(len(self.retrieval_calls), 1)
+
+    def test_critic_can_reject_standalone_revenue_for_a_consolidated_lookup(self):
+        question = "What was HUL's consolidated revenue in FY24?"
+        standalone = {**ROWS[0], 'standalone_consolidated': 'standalone'}
+        consolidated = {**ROWS[0], 'chunk_id': 'c2', 'page': 10, 'text': 'Revenue 120',
+                        'standalone_consolidated': 'consolidated'}
+        self.p3.retrieve = lambda **kwargs: [standalone, consolidated]
+        gate = {**GATE, 'resolved_question': question}
+        plan = {**PLAN, 'subtasks': [{**PLAN['subtasks'][0], 'question': question}]}
+        critique = {'verdict': 'revise', 'issues': [{
+            'claim': '100 crore', 'quote': '100 crore', 'correct': 'Consolidated revenue was 120 crore',
+            'problem': 'answers_wrong_question', 'fix_owner': 'analyst',
+            'instruction': 'Use consolidated FY24 revenue from c2.'}]}
+        model = ScriptedModel([gate, plan, QUERY, ANALYST, WRITER, critique])
+
+        result = self.execute(model)
+
+        writer_prompt = model.calls[4][0][-1]['content']
+        critic_prompt = model.calls[5][0][-1]['content']
+        self.assertIn('Revenue 100', writer_prompt)
+        self.assertNotIn('Revenue 120', writer_prompt)
+        self.assertIn('Revenue 100', critic_prompt)
+        self.assertIn('Revenue 120', critic_prompt)
+        self.assertIn('FY24, standalone', critic_prompt)
+        self.assertIn('FY24, consolidated', critic_prompt)
+        self.assertEqual(result.status, 'partial')
+        self.assertFalse(result.cacheable)
+        self.assertNotIn(WRITER['answer'], result.answer)
+
     def test_partial_validation_is_partial_and_not_cached(self):
         critic={'verdict':'revise','issues':[{'claim':'100 crore','quote':'100 crore','correct':'100 crore','problem':'wrong_number',
             'fix_owner':'writer','instruction':'Recheck the claim.'}]}

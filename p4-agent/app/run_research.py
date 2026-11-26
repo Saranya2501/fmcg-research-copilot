@@ -1,16 +1,28 @@
 """Command-line wrapper around the integrated P2/P3 runtime."""
-import argparse, json, os
+import argparse
+import json
+import os
+from pathlib import Path
+
 from integration.runtime import run_query
+
+P4_ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
     parser = argparse.ArgumentParser(description="Competitive Research Copilot P4 integrated query runner")
     parser.add_argument("question", help="Research question")
-    parser.add_argument("--p2", default=os.getenv("P2_PACKAGE_PATH"), help="Path to extracted P2 agents package")
-    parser.add_argument("--p3", default=os.getenv("P3_RAG_PATH"), help="Path to P3 RAG runtime (retrieve.py, index/, parsed/)")
+    parser.add_argument(
+        "--p2",
+        default=os.getenv("P2_PACKAGE_PATH") or str(P4_ROOT / "integration/p2_agents"),
+        help="Path to P2 agents (defaults to the bundled package)",
+    )
+    parser.add_argument(
+        "--p3",
+        default=os.getenv("P3_RAG_PATH") or str(P4_ROOT / "p3_retrieval"),
+        help="Path to P3 retrieval and its data (defaults to the bundled runtime)",
+    )
     args = parser.parse_args()
-    if not args.p2 or not args.p3:
-        parser.error("Set P2_PACKAGE_PATH and P3_RAG_PATH or pass --p2 and --p3")
     result = run_query(args.question, args.p2, args.p3)
     print(json.dumps(result, indent=2, default=str))
 

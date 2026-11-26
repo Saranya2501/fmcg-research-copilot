@@ -16,20 +16,13 @@ from integrations.tracing import trace_identity, trace_step, update_observation
 logger = logging.getLogger(__name__)
 
 def process_chat_turn(question: str, conversation_id: str, *, filters: dict | None = None,
-                      bypass_cache: bool = False, mode='research', on_text=None, on_progress=None, user_session_id=None) -> str:
+                      bypass_cache: bool = False, on_progress=None, user_session_id=None) -> str:
     if user_session_id is not None:
         require_conversation_owner(conversation_id, user_session_id)
     started = time.perf_counter()
     history = load_messages(conversation_id)
     filters = filters or {}
-    if mode=='chat':
-        from integrations.agent_bridge import configuration
-        config=configuration(direct=True)
-    elif mode!='research':
-        raise ValueError('Chat mode must be research or chat')
-    else:
-        config=response_config()
-    config = {**config, "bypass_model_cache": bypass_cache}
+    config = {**response_config(), "bypass_model_cache": bypass_cache}
     ttl = positive_setting("CHAT_CACHE_TTL_SECONDS", 3600)
     enabled = os.getenv("CHAT_CACHE_ENABLED", "true").lower() == "true"
     status = ("bypass_preview" if config["backend"] == "preview" else
@@ -57,8 +50,7 @@ def process_chat_turn(question: str, conversation_id: str, *, filters: dict | No
             name = "respond-preview" if config["backend"] == "preview" else "generate-response"
             with trace_step(name, question=question, conversation_id=conversation_id, metadata=details) as response:
                 result = generate_response(question, history, filters, config,
-                    **({"on_progress": on_progress} if on_progress is not None else {}),
-                    **({"on_text": on_text} if on_text is not None else {}))
+                    **({"on_progress": on_progress} if on_progress is not None else {}))
                 update_observation(response, output=result.answer)
             if use_cache and result.successful and result.cacheable:
                 try:

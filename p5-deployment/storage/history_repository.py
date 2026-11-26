@@ -6,13 +6,11 @@ from uuid import uuid4
 
 from storage.database import history_db
 
-def create_conversation(mode='research', *, user_session_id=None) -> str:
-    if mode not in ('research','chat'):
-        raise ValueError('Conversation mode must be research or chat')
+def create_conversation(*, user_session_id=None) -> str:
     conversation_id = str(uuid4())
     with history_db() as db:
-        db.execute("INSERT INTO conversations (id,title,created_at,mode,user_session_id) VALUES (?, ?, ?, ?, ?)",
-                   (conversation_id, "New chat", datetime.now(timezone.utc).isoformat(),mode,user_session_id))
+        db.execute("INSERT INTO conversations (id,title,created_at,user_session_id) VALUES (?, ?, ?, ?)",
+                   (conversation_id, "New chat", datetime.now(timezone.utc).isoformat(),user_session_id))
     return conversation_id
 
 
@@ -99,12 +97,6 @@ def find_resume_conversation(identifier, conversation_id):
                 (identifier,),
             ).fetchone()
         return selected['id'] if selected else None
-
-
-def conversation_mode(conversation_id):
-    with history_db() as db:
-        row = db.execute("SELECT mode FROM conversations WHERE id=?", (conversation_id,)).fetchone()
-        return row['mode'] if row else 'research'
 
 
 def list_conversations(identifier):

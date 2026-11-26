@@ -1,6 +1,11 @@
 import re
 from p4.config import (
-    PROHIBITED_PATTERNS, MAX_STEPS_PER_SUBTASK, MAX_REPAIR_ROUNDS
+    PROHIBITED_PATTERNS, MAX_STEPS_PER_SUBTASK, MAX_REPAIR_ROUNDS,
+    UNLISTED_OR_UNSUPPORTED,
+)
+
+UNSUPPORTED_COMPANY_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(name) for name in sorted(UNLISTED_OR_UNSUPPORTED)) + r")\b"
 )
 
 REFUSAL_MESSAGES = {
@@ -15,7 +20,7 @@ def gatekeeper(query: str, company_names: list[str] | None = None) -> dict:
     for code, phrases in PROHIBITED_PATTERNS.items():
         if any(phrase in q for phrase in phrases):
             return {"status": "refused", "refusal_code": code, "message": REFUSAL_MESSAGES[code]}
-    if re.search(r"\b(amul|patanjali)\b", q):
+    if UNSUPPORTED_COMPANY_PATTERN.search(q):
         code = "unsupported_unlisted_company"
         return {"status": "refused", "refusal_code": code, "message": REFUSAL_MESSAGES[code]}
     return {"status": "allowed", "message": "Request passed the initial policy gate; company scope and evidence still require validation."}

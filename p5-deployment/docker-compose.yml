@@ -1,19 +1,4 @@
 services:
-  redis:
-    image: redis:8.10.3
-    command: ["redis-server", "--appendonly", "yes"]
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && redis-cli FT._LIST > /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
   streamlit:
     build:
       context: ..
@@ -23,9 +8,6 @@ services:
     ports:
       - "127.0.0.1:8501:8501"
     restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
     env_file:
       - path: .env
         required: false
@@ -45,7 +27,7 @@ services:
           create_host_path: false
       - ./certs:/app/p5-deployment/certs:ro
     environment:
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: ""
       P3_RAG_PATH: /app/p4-agent/p3_retrieval
       LLM_LOG_PATH: /app/p5-deployment/data/logs/llm_calls.jsonl
       LLM_CACHE_PATH: /app/p5-deployment/data/llm_cache.sqlite
@@ -53,4 +35,3 @@ services:
 
 volumes:
   chat-history:
-  redis-data:

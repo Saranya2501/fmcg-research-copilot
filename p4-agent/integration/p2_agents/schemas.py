@@ -29,6 +29,7 @@ class Chunk(BaseModel):
     page: Optional[int] = None
     section: Optional[str] = None
     text: str
+    standalone_consolidated: Optional[str] = None
     score: Optional[float] = None
 
 

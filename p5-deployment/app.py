@@ -13,7 +13,7 @@ from storage.history_repository import (
     create_conversation, create_user_session, session_usage,
     conversation_title, save_message, load_messages,
 )
-from chat.chat_settings import positive_setting, retrieval_enabled, response_config
+from chat.chat_settings import positive_setting, response_config
 from chat.rate_limit import check_rate_limit
 from chat.response_backend import generate_response
 from chat.chat_service import process_chat_turn

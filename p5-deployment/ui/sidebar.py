@@ -24,6 +24,6 @@ def render_sidebar(user_session_id, user_name):
                     key=f"history_{conversation['id']}",
                     type="primary" if conversation["id"] == st.session_state.active_conversation_id else "secondary",
                     width="stretch",
-                    on_click=select_conversation,args=(conversation['id'],conversation['mode']),
+                    on_click=select_conversation, args=(conversation['id'],),
                 )
 

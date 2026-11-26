@@ -143,12 +143,25 @@ def run_query(question: str, p2_path: str, p3_path: str, llm=None, tag="p4.integ
                             "value":calculated,"unit":analyst.calculation.result_unit,
                             "chunk_ids":[v.chunk_id for v in analyst.values],
                             "formula":analyst.calculation.expression})
-    # Keep only unique evidence chunks for Writer/Critic.
-    chunk_by_id={c.chunk_id:c for c in all_chunks}; evidence=list(chunk_by_id.values())[:5]
+    chunk_by_id = {chunk.chunk_id: chunk for chunk in all_chunks}
+    evidence = list(chunk_by_id.values())[:5]
+    # The critic needs the other candidates to check the selected figure.
+    writer_evidence = evidence
+    if (
+        len(plan.subtasks) == 1
+        and plan.subtasks[0].kind == "lookup"
+        and not missing
+        and len(results) == 1
+        and results[0]["value"] is not None
+        and len(results[0]["chunk_ids"]) == 1
+    ):
+        source = chunk_by_id.get(results[0]["chunk_ids"][0])
+        if source is not None:
+            writer_evidence = [source]
     if missing and not any(result["value"] is not None for result in results):
         return {"status": "partial_validation", "results": results, "missing": missing,
                 "retrieved_chunks": len(evidence)}
-    draft=_as_obj(agents.run_writer(llm, gate.resolved_question, results, evidence, tag=tag))
+    draft=_as_obj(agents.run_writer(llm, gate.resolved_question, results, writer_evidence, tag=tag))
     critique=_as_obj(agents.run_critic(llm, gate.resolved_question, draft, results, evidence, tag=tag))
     if critique.verdict != "pass":
         # Report the critic outcome explicitly; do not claim a fully validated answer.
