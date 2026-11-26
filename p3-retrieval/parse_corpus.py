@@ -167,7 +167,7 @@ def parse_filename(pdf_path: Path) -> tuple[str, str, str, str]:
     safe_folder = folder.lower().replace(" ", "_")
     # Include sanitised filename stem to guarantee uniqueness across files sharing the same Q+FY
     # (e.g. results PDF vs presentation PDF vs transcript for the same quarter)
-    safe_name = re.sub(r'[^a-z0-9]+', '_', name_lower).strip('_')[:40]
+    safe_name = re.sub(r'[^a-z0-9]+', '_', name_lower).strip('_')[:60]
     doc_id = f"{safe_folder}_{doc_type}{quarter_tag}_{fy_short}_{safe_name}".lower()
     return company, fy_short, doc_type, doc_id
 
