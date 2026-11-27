@@ -1,4 +1,4 @@
-# P2 → P4 interface: LLM client and agents (agents-v4)
+# P2 → P4 interface: LLM client and agents (agents-v10.2)
 
 Everything P4 needs to wire the agent graph. All examples use the fictional company Example Foods.
 
@@ -11,7 +11,7 @@ Everything P4 needs to wire the agent graph. All examples use the fictional comp
 | `schemas.py` | Pydantic input/output models for every agent |
 | `json_utils.py` | `call_json()`: JSON mode → local fixes → schema validation → grounding check → up to 2 repairs |
 | `agents.py` | One function per agent (below) |
-| `prompts/*.md` | Prompt files, versioned as `agents-v4`; `_shared.md` is prepended to each |
+| `prompts/*.md` | Prompt files, versioned as `agents-v10.2`; `_shared.md` is prepended to each |
 | `samples/` | Valid and invalid JSON examples |
 | `tests/test_agents.py` | Offline tests with a fake model (`python tests/test_agents.py`) |
 | `live_check.py` | One real call per agent; run in an API slot |
@@ -146,3 +146,61 @@ For `compare_rank`, P4 should sort the results in code and pass the order to the
 - Calculator input: evaluate `a.calculation.expression` with `variables` mapped to the extracted values. Allow only numbers, variables and `+ - * / ( )`.
 - Convert `Rs lakh` / `Rs million` to `Rs crore` with unit_convert **before** the calculator when units differ.
 - Log `JsonResult.attempts`, `.repairs` and `.errors` on every step: P5 needs them for the JSON validity metric.
+
+### Changes in agents-v5 (real report pages)
+| Finding | Fix |
+| --- | --- |
+| Scope is FY17–FY26 (last ten years) | `COVERED_YEARS` and the Gatekeeper/shared prompts updated |
+| On real annual-report tables the Analyst's quote failed the exact-match check (row label and number are separated by other years' columns) | Grounding now requires the number to appear in the chunk and in the quote, and the quote's words to come from the chunk; an exact contiguous quote is no longer required. Invented numbers are still rejected |
+| Reports print figures in Rs lakh or Rs million (Nestlé, Colgate) | Analyst reports the unit as printed; P4's `unit_convert` must convert lakh (÷100) and million (÷10) to crore before the calculator and Writer |
+
+### Changes in agents-v6 (small talk and latency)
+| Finding | Fix |
+| --- | --- |
+| "hi" went through the whole chain; the Planner turned a greeting into an invalid task and errored | **`quick_route(message)`**: call it first; greetings, thanks, "help", "what can you do?" get a canned reply with **no model call** |
+| Small talk the regex doesn't catch | Gatekeeper has **UC0** (small talk / help) with `direct_reply`; show it and stop |
+| Planner reached for non-research input | `run_planner` raises `ValueError` for UC0, UC7 or `in_scope=false`: show `direct_reply` or `refusal_message` instead |
+
+Recommended flow: `quick_route` → (text? reply, stop) → `run_gatekeeper` → UC0: `direct_reply`, stop · UC7 / not in scope: `refusal_message`, stop · otherwise plan. Also wrap each agent step in `try/except AgentOutputError` and show a polite "couldn't complete that" message instead of a stack trace.
+
+### Changes in agents-v7 (first run on real chunks)
+| Finding (real-chunk test, 15 questions) | Fix |
+| --- | --- |
+| Writer shortened long chunk ids (`..._p0179_c906` → `c906`), so the citation check rejected the answer (2 errors) | Agents now see short ids **E1..E5**; any id the model writes (E1, the real id, or a shortened one) is resolved, and all output ids are mapped back to the real chunk ids. P4 passes real chunks in and gets real ids out; nothing to change |
+| Analyst returned a calculation with an empty expression on plain lookups (2 errors) | Empty calculations are dropped (`local_fixes: "empty calculation removed"`) |
+| A converted value kept the label "Rs million", so the Writer wrote "2,390.5 million" (Critic caught it) | **`compute_result(analyst_output)`** converts lakh/million to crore, runs the calculation safely, and always labels money results "Rs crore". **P4: use this instead of your own calculator + unit_convert** |
+| Chunks carry `standalone_consolidated` from P3 | `Chunk.standalone_consolidated`; shown in the evidence header so the Analyst can prefer consolidated |
+
+### Changes in agents-v8 (38-question real-chunk run: 19/38 correct)
+| Finding | Fix |
+| --- | --- |
+| Growth questions gave 0.0, -99, 60,480 or 1,357%: the Analyst labelled FY24 and FY23 figures identically ("revenue from operations"), so the calculation used the same number twice | Labels must be unique (code check + repair); prompt asks for the fiscal year in each label and has a worked growth example |
+| A margin came out as 0.16% instead of 16% | A `%` result without `* 100` is sent back for repair |
+| Model wrote `e1` instead of `E1` (4 errors) | Chunk ids resolved case-insensitively |
+
+### Changes in agents-v9 (38-question run: 24/38 correct)
+| Finding | Fix |
+| --- | --- |
+| On plain lookups the Analyst sometimes added a calculation (EBITDA → margin), so the result disagreed with the question | Calculations are dropped when the sub-task is a `lookup` |
+| Expression `"null"` crashed the calculator | Treated as no calculation |
+| Units written loosely ("Rs", "crores", "₹ in lakhs") failed validation | Units are normalised before validation |
+
+### Changes in agents-v10 (38-question run with v9: 27/38 correct)
+| Finding | Fix |
+| --- | --- |
+| A result unit the schema did not know (q015) failed the whole Analyst call | Unknown result units become empty and the calculator infers them (`* 100` → %, money inputs → Rs crore) |
+| Variable labels written slightly differently from the extracted labels (q023: "operating profit FY24" vs "Operating Profit (FY24)") | Labels are matched ignoring case, spaces and brackets |
+| A margin question answered with a money figure (q028 gave Rs 5,340.61 crore instead of 22.0%) | For margin, %, share or growth questions the Analyst must return a % (or x) result, otherwise it is sent back once |
+
+New test scripts (no change for P4): `refusal_check.py` (section 4c) and `text_eval.py` (section 4d).
+
+### Changes in agents-v10.1 (refusal check 4c: 11/12 refused, 18/18 answered)
+| Finding | Fix |
+| --- | --- |
+| "Rank Amul, Patanjali and HUL by profitability" was classed as an in-scope ranking (q080) | After the Gatekeeper, code refuses any request that names a company outside the covered list (`out_of_scope`). No change to how P4 calls `run_gatekeeper` |
+
+### Changes in agents-v10.2 (text check 4d: 5 of 10 brief sections lost to Critic errors)
+| Finding | Fix |
+| --- | --- |
+| The Critic invented problem labels ("misleading", "missing data"), so a valid section was thrown away | Unknown labels are mapped to the nearest allowed one; unknown `fix_owner` becomes "writer" |
+| A Critic quote that was never found in the draft failed the whole answer | `run_critic` never raises now: the draft is kept, rule checks still run, and `CriticOutput.verified = False`. **P4: when `verified` is False, show the answer with a short "not independently checked" note** |

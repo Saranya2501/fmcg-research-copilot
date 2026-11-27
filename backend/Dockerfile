@@ -21,10 +21,10 @@ COPY --chown=appuser:appuser backend/chat /app/backend/chat
 COPY --chown=appuser:appuser backend/integrations /app/backend/integrations
 COPY --chown=appuser:appuser backend/storage /app/backend/storage
 COPY --chown=appuser:appuser backend/ui /app/backend/ui
-COPY --chown=appuser:appuser retrival/p4 /app/retrival/p4
+COPY --chown=appuser:appuser retrival/agent /app/retrival/agent
 COPY --chown=appuser:appuser retrival/integration/runtime.py /app/retrival/integration/runtime.py
 COPY --chown=appuser:appuser retrival/integration/p2_agents /app/retrival/integration/p2_agents
-COPY --chown=appuser:appuser retrival/p3_retrieval/retrieve.py /app/retrival/p3_retrieval/retrieve.py
+COPY --chown=appuser:appuser retrival/core/retrieve.py /app/retrival/core/retrieve.py
 
 USER appuser
 EXPOSE 8501

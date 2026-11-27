@@ -68,6 +68,8 @@ def run_query(question: str, p2_path: str, p3_path: str, llm=None, tag="p4.integ
     llm = llm or clientmod.LLMClient()
     state = schemas.ConversationState()
     gate = _as_obj(agents.run_gatekeeper(llm, question, state, tag=tag))
+    if gate.use_case == "UC0" and getattr(gate, "direct_reply", None):
+        return {"status": "conversation", "message": gate.direct_reply}
     if not gate.in_scope:
         return {"status":"refused", "message":gate.refusal_message, "use_case":gate.use_case}
     plan = _as_obj(agents.run_planner(llm, gate, tag=tag))
@@ -124,13 +126,14 @@ def run_query(question: str, p2_path: str, p3_path: str, llm=None, tag="p4.integ
         calculated=None
         if analyst.calculation:
             expr=analyst.calculation.expression
-            value_map={v.label:v.value for v in analyst.values}
+            to_crore = getattr(agents, "TO_CRORE", {})
+            value_map = {v.label: v.value * to_crore.get(v.unit, 1.0) for v in analyst.values}
             substitutions={k:value_map[label] for k,label in analyst.calculation.variables.items() if label in value_map}
             # The P4 calculator accepts arithmetic AST only; substitute named variables before evaluation.
             for name,val in sorted(substitutions.items(), key=lambda x:-len(x[0])):
                 expr=re.sub(rf"\b{re.escape(name)}\b", str(float(val)), expr)
             if calculator is None:
-                from p4.tools.calculator import calculator
+                from agent.tools.calculator import calculator
             calculated=calculator(expr)["value"]
         for v in vals:
             results.append({"subtask_id":subtask.id,"company":subtask.company,
@@ -140,7 +143,8 @@ def run_query(question: str, p2_path: str, p3_path: str, llm=None, tag="p4.integ
         if calculated is not None:
             results.append({"subtask_id":subtask.id,"company":subtask.company,
                             "metric":subtask.metric,"fiscal_year":subtask.fiscal_year,
-                            "value":calculated,"unit":analyst.calculation.result_unit,
+                            "value":calculated,
+                            "unit":"Rs crore" if analyst.calculation.result_unit in to_crore else analyst.calculation.result_unit,
                             "chunk_ids":[v.chunk_id for v in analyst.values],
                             "formula":analyst.calculation.expression})
     chunk_by_id = {chunk.chunk_id: chunk for chunk in all_chunks}

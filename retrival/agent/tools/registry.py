@@ -1,9 +1,9 @@
-from p4.tools.calculator import calculator
-from p4.tools.unit_convert import unit_convert
-from p4.tools.company_lookup import company_lookup
-from p4.tools.metric_lookup import metric_lookup
-from p4.tools.retrieval import RetrievalAdapter
-from p4.tools.report import generate_report
+from agent.tools.calculator import calculator
+from agent.tools.unit_convert import unit_convert
+from agent.tools.company_lookup import company_lookup
+from agent.tools.metric_lookup import metric_lookup
+from agent.tools.retrieval import RetrievalAdapter
+from agent.tools.report import generate_report
 
 def build_tool_registry(retrieval: RetrievalAdapter):
     return {

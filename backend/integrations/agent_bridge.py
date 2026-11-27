@@ -37,7 +37,7 @@ def p2_path():
 
 
 def rag_path():
-    return Path(os.getenv("P3_RAG_PATH") or str(P4_ROOT/"p3_retrieval")).expanduser().resolve()
+    return Path(os.getenv("P3_RAG_PATH") or str(P4_ROOT/"core")).expanduser().resolve()
 
 
 def missing_setup():
@@ -60,7 +60,7 @@ def configuration():
     settings = connection()
     endpoint = settings.base_url
     code = [Path(__file__),Path(__file__).with_name("external_p2.py"),Path(__file__).with_name('api_connection.py')]
-    code += [P4_ROOT/"integration/runtime.py"] + sorted((P4_ROOT/"p4").rglob("*.py"))
+    code += [P4_ROOT/"integration/runtime.py"] + sorted((P4_ROOT/"agent").rglob("*.py"))
     pipeline = hashlib.sha256(b"".join(p.read_bytes() for p in code) + fingerprint(p2_path()).encode()).hexdigest()[:16]
     budget = int(os.getenv("AGENT_TOKEN_BUDGET","6000"))
     if budget < 1: raise ValueError("AGENT_TOKEN_BUDGET must be positive")
@@ -248,7 +248,7 @@ def run_agent(question, history, filters, config, *, on_progress=None):
     request_filters=dict(filters or {})
     def calculate(expression):
         enter_step("calculate")
-        from p4.tools.calculator import calculator
+        from agent.tools.calculator import calculator
         if len(expression)>256:
             raise ValueError('Calculator expression too long')
         tree=ast.parse(expression,mode='eval')
@@ -270,6 +270,7 @@ def run_agent(question, history, filters, config, *, on_progress=None):
         schemas, agents = modules['schemas'], modules['agents']
         agent_proxy=SimpleNamespace(**{name:agent_wrapper(name,getattr(agents,name))
             for name in ('run_gatekeeper','run_planner','run_query_writer','run_analyst','run_writer','run_critic')})
+        agent_proxy.TO_CRORE = getattr(agents, 'TO_CRORE', {})
         agent_proxy.AgentOutputError = modules['json_utils'].AgentOutputError
 
         p3=load_retrieval(str(rag_path()))
@@ -308,6 +309,8 @@ def run_agent(question, history, filters, config, *, on_progress=None):
 def normalize_response(raw,evidence,context,usage,metrics):
     status=raw.get('status')
     limitations=raw.get('missing',[])
+    if status == 'conversation':
+        return ChatResponse(raw['message'], status='conversation', usage=usage, metrics=metrics)
     if status=='refused':
         return ChatResponse(raw.get('message') or 'This request is outside the supported scope.',
                             status='refused',agent_context=context,usage=usage,metrics=metrics)
@@ -344,8 +347,11 @@ def normalize_response(raw,evidence,context,usage,metrics):
         citations.append({'document':source.get('doc') or source.get('doc_id') or item.get('doc'),
             'page':source.get('page',item.get('page')),'company':source.get('company'),
             'source_id':item.get('chunk_id')})
+    critic = raw.get('critic', {})
+    if critic.get('verified') is False:
+        limitations = [*limitations, 'The critic could not independently verify this draft.']
     complete=(bool(answer.get('answer')) and bool(citations) and valid_citations
-              and not limitations and raw.get('critic',{}).get('verdict')=='pass')
+              and not limitations and critic.get('verdict')=='pass')
     if not complete and not limitations:
         limitations=['P4 evidence or citation validation incomplete']
     return ChatResponse(answer=answer.get('answer') or 'No verified answer returned.',citations=citations,

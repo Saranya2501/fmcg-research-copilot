@@ -10,8 +10,9 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-UseCase = Literal["UC1", "UC2", "UC3", "UC4", "UC5", "UC6", "UC7"]
+UseCase = Literal["UC0", "UC1", "UC2", "UC3", "UC4", "UC5", "UC6", "UC7"]   # UC0 = small talk / help, no research
 RefusalReason = Literal["advice_or_forecast", "out_of_scope", "not_in_context", "unsafe"]
+UNITS = ("Rs crore", "Rs lakh", "Rs million", "%", "x", "count")
 Unit = Literal["Rs crore", "Rs lakh", "Rs million", "%", "x", "count"]   # Analyst reports the unit as printed; P4 converts with unit_convert
 DocType = Literal["annual_report", "quarterly_results", "press_release",
                   "investor_presentation", "call_transcript", "brsr", "other"]
@@ -28,8 +29,9 @@ class Chunk(BaseModel):
     doc: str                               # file name, e.g. "Dabur_AR_FY24.pdf"
     page: Optional[int] = None
     section: Optional[str] = None
+    standalone_consolidated: Optional[str] = None   # "consolidated" | "standalone" | "unknown" (P3)
+    source_id: Optional[str] = None                 # set by agents.py: the real chunk id behind a short E1..E5 id
     text: str
-    standalone_consolidated: Optional[str] = None
     score: Optional[float] = None
 
 
@@ -52,6 +54,7 @@ class GateOutput(BaseModel):
     metrics: list[str] = []
     fiscal_years: list[str] = []           # "FY24"
     resolved_question: str                 # follow-ups rewritten as a standalone question
+    direct_reply: Optional[str] = None     # UC0 only: the reply shown to the user; nothing is planned
 
     @field_validator("fiscal_years")
     @classmethod
@@ -102,10 +105,39 @@ class ExtractedValue(BaseModel):
     quote: str                             # exact text from the chunk containing the number
 
 
+    @field_validator("unit", mode="before")
+    @classmethod
+    def _norm_unit(cls, v):
+        return _coerce_unit(v)
+
 class Calculation(BaseModel):
     expression: str                        # uses labels as variables, e.g. "a_p / revenue * 100"
     variables: dict[str, str]              # variable -> label of an ExtractedValue
-    result_unit: Unit
+    result_unit: Optional[Unit] = None     # unknown spellings become None; compute_result infers it (agents-v10)
+
+    @field_validator("result_unit", mode="before")
+    @classmethod
+    def _norm_unit(cls, v):
+        v = _coerce_unit(v)
+        return v if v in UNITS else None
+
+
+def _coerce_unit(v):
+    """Map loose unit spellings ("Rs", "crores", "INR crore", "percent") to the allowed set."""
+    if v is None:
+        return v
+    t = str(v).lower()
+    if "%" in t or "percent" in t:
+        return "%"
+    if "lakh" in t:
+        return "Rs lakh"
+    if "million" in t or t.strip() in ("mn", "rs mn"):
+        return "Rs million"
+    if "crore" in t or t.strip() in ("rs", "inr", "rs.", "cr"):
+        return "Rs crore"
+    if t.strip() in ("times", "x"):
+        return "x"
+    return v
 
 
 class AnalystOutput(BaseModel):
@@ -150,10 +182,33 @@ class CriticIssue(BaseModel):
     fix_owner: Literal["researcher", "analyst", "writer"]
     instruction: str                       # what the owner must change
 
+    @field_validator("problem", mode="before")
+    @classmethod
+    def _norm_problem(cls, v):
+        """Map labels the 8B model invents ("misleading", "missing_data") to the allowed set (agents-v10.2)."""
+        allowed = ("unsupported", "wrong_number", "wrong_unit", "wrong_fiscal_year", "missing_citation",
+                   "incomplete", "answers_wrong_question", "unsafe")
+        t = str(v or "").lower().strip()
+        if t in allowed:
+            return t
+        for keys, label in ((("citation", "cite", "source"), "missing_citation"), (("unit", "crore", "lakh"), "wrong_unit"),
+                            (("year", "fy", "period"), "wrong_fiscal_year"), (("number", "value", "figure", "calc"), "wrong_number"),
+                            (("missing", "incomplete", "gap", "omit"), "incomplete"), (("question", "irrelevant"), "answers_wrong_question")):
+            if any(k in t for k in keys):
+                return label
+        return "unsupported"
+
+    @field_validator("fix_owner", mode="before")
+    @classmethod
+    def _norm_owner(cls, v):
+        t = str(v or "").lower()
+        return next((o for o in ("researcher", "analyst", "writer") if o in t), "writer")
+
 
 class CriticOutput(BaseModel):
     verdict: Literal["pass", "revise"]
     issues: list[CriticIssue] = []
+    verified: bool = True                  # False: the Critic's output was unusable; the draft is shown unverified (agents-v10.2)
 
     @field_validator("issues")
     @classmethod

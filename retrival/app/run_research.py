@@ -19,7 +19,7 @@ def main():
     )
     parser.add_argument(
         "--p3",
-        default=os.getenv("P3_RAG_PATH") or str(P4_ROOT / "p3_retrieval"),
+        default=os.getenv("P3_RAG_PATH") or str(P4_ROOT / "core"),
         help="Path to P3 retrieval and its data (defaults to the bundled runtime)",
     )
     args = parser.parse_args()

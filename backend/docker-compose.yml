@@ -14,21 +14,21 @@ services:
     volumes:
       - chat-history:/app/backend/data
       - type: bind
-        source: ../retrival/p3_retrieval/index
-        target: /app/retrival/p3_retrieval/index
+        source: ../retrival/core/index
+        target: /app/retrival/core/index
         read_only: true
         bind:
           create_host_path: false
       - type: bind
-        source: ../retrival/p3_retrieval/parsed
-        target: /app/retrival/p3_retrieval/parsed
+        source: ../retrival/core/parsed
+        target: /app/retrival/core/parsed
         read_only: true
         bind:
           create_host_path: false
       - ./certs:/app/backend/certs:ro
     environment:
       REDIS_URL: ""
-      P3_RAG_PATH: /app/retrival/p3_retrieval
+      P3_RAG_PATH: /app/retrival/core
       LLM_LOG_PATH: /app/backend/data/logs/llm_calls.jsonl
       LLM_CACHE_PATH: /app/backend/data/llm_cache.sqlite
       LLM_LOCK_PATH: /app/backend/data/llm_api.lock

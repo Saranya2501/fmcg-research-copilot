@@ -5,7 +5,7 @@ output 512 by default and 1,024 max, 1 active request per group key,
 retry 429/503 after 2, 4 and 8 s.
 """
 
-PROMPT_VERSION = "agents-v4"          # tag every trace with this (P5)
+PROMPT_VERSION = "agents-v10.2"          # tag every trace with this (P5)
 
 # ---- API limits ----------------------------------------------------------
 CONTEXT_LIMIT = 8192                  # tokens, input + output
@@ -36,6 +36,7 @@ AGENT_SETTINGS = {
     "section_writer": {"max_tokens": 900, "temperature": 0.0},
     "critic":         {"max_tokens": 600, "temperature": 0.0},
     "repair":         {"max_tokens": 900, "temperature": 0.0},
+    "judge":          {"max_tokens": 700, "temperature": 0.0},   # text_eval.py only (agents-v10)
 }
 
 # ---- Evidence budget (keeps every call inside 8,192 tokens) ---------------
@@ -46,4 +47,4 @@ MAX_CHUNK_CHARS = 2400                # ~512 tokens per chunk
 # ---- Scope (replace with P1/P3's final list) ------------------------------
 COVERED_COMPANIES = ["HUL", "ITC", "Nestle India", "Dabur", "Britannia", "Marico",
                      "Godrej Consumer", "Colgate-Palmolive India", "Tata Consumer", "Emami"]
-COVERED_YEARS = ["FY22", "FY23", "FY24", "FY25", "FY26"]
+COVERED_YEARS = [f"FY{y}" for y in range(17, 27)]      # FY17-FY26, last 10 years

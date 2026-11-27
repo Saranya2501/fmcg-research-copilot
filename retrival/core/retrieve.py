@@ -22,7 +22,7 @@ import httpx
 import numpy as np
 from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
-from p4.config import COMPANIES
+from agent.config import COMPANIES
 
 load_dotenv()
 warnings.filterwarnings("ignore")

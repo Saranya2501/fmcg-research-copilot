@@ -173,7 +173,7 @@ the adapter loads P2 into an isolated import namespace, avoiding collisions with
 flat module names such as `config`, `schemas` and `agents`.
 
 P2 defaults to `retrival/integration/p2_agents`; override with `P2_PACKAGE_PATH`.
-Retrieval defaults to `retrival/p3_retrieval` inside the supplied P4 package.
+Retrieval defaults to `retrival/core` inside the supplied P4 package.
 Use `P3_RAG_PATH` to override the location.
 The retrieval directory must contain `retrieve.py`, `index/bm25.pkl`, `index/faiss.index`,
 `index/chunk_ids.json`, and `parsed/all_chunks.jsonl`. The supplied index files

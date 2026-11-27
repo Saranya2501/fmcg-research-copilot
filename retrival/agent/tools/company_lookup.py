@@ -1,4 +1,4 @@
-from p4.config import COMPANIES, UNLISTED_OR_UNSUPPORTED
+from agent.config import COMPANIES, UNLISTED_OR_UNSUPPORTED
 
 def company_lookup(name: str) -> dict:
     key = name.strip().lower()

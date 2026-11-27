@@ -3,7 +3,7 @@
 ## Included/available now
 - P4 LangGraph graph, shared state, guards, tool registry, schemas, and tests.
 - P2 agent implementation and prompts included in the current package integration folder (agent/model-client interface).
-- P3 `retrieve.py` source included in `p3_retrieval/`.
+- P3 `retrieve.py` source included in `core/`.
 - P3 index bundle (BM25, FAISS, chunk-ID mapping) included as a ZIP.
 - P3 corpus manifest and P1 response/evidence contract.
 - Sample chunk file supplied on 22 Nov 2026 added under `demo_data/`. This is a sample, not asserted to be the full corpus.

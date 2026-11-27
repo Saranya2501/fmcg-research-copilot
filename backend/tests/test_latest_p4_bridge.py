@@ -124,8 +124,8 @@ class LatestP4BridgeTests(unittest.TestCase):
         self.assertNotIn('Revenue 120', writer_prompt)
         self.assertIn('Revenue 100', critic_prompt)
         self.assertIn('Revenue 120', critic_prompt)
-        self.assertIn('FY24, standalone', critic_prompt)
-        self.assertIn('FY24, consolidated', critic_prompt)
+        self.assertIn('p.9, standalone', critic_prompt)
+        self.assertIn('p.10, consolidated', critic_prompt)
         self.assertEqual(result.status, 'partial')
         self.assertFalse(result.cacheable)
         self.assertNotIn(WRITER['answer'], result.answer)
@@ -180,7 +180,7 @@ class LatestP4BridgeTests(unittest.TestCase):
     def test_flat_module_names_cannot_select_an_old_p2_package(self):
         with patch.dict(sys.modules,{'config':SimpleNamespace(PROMPT_VERSION='wrong-source')}):
             modules=load_p2(bridge.p2_path())
-        self.assertEqual(modules['config'].PROMPT_VERSION,'agents-v4')
+        self.assertEqual(modules['config'].PROMPT_VERSION,'agents-v10.2')
         self.assertTrue(Path(modules['agents'].__file__).is_relative_to(bridge.P4_ROOT))
 
     def test_missing_or_unknown_page_never_becomes_cacheable(self):
@@ -189,10 +189,20 @@ class LatestP4BridgeTests(unittest.TestCase):
         self.assertFalse(result.cacheable)
         self.assertEqual(result.status,'partial')
 
+    def test_unverified_critic_pass_is_partial_and_not_cached(self):
+        result = self.execute(ScriptedModel([
+            GATE, PLAN, QUERY, ANALYST, WRITER, {**CRITIC, 'verified': False},
+        ]))
+        self.assertEqual(result.status, 'partial')
+        self.assertFalse(result.successful)
+        self.assertFalse(result.cacheable)
+        self.assertIn('The critic could not independently verify this draft.', result.limitations)
+
     def test_runtime_calculator_is_traced_and_counted(self):
         analysis={**ANALYST,'calculation':{'expression':'revenue / 2','variables':{'revenue':'revenue'},'result_unit':'Rs crore'}}
         writer={**WRITER,'answer':'Calculated value: 50 crore [c1].','value':50}
-        result=self.execute(ScriptedModel([GATE,PLAN,QUERY,analysis,writer,CRITIC]))
+        plan = {**PLAN, 'subtasks': [{**PLAN['subtasks'][0], 'kind': 'calculate'}]}
+        result=self.execute(ScriptedModel([GATE,plan,QUERY,analysis,writer,CRITIC]))
         self.assertEqual(result.status,'answered')
         self.assertEqual(result.metrics['tool_calls'],2)
         self.assertEqual(result.results[-1]['value'],50)
@@ -208,7 +218,8 @@ class LatestP4BridgeTests(unittest.TestCase):
                 'result_unit': '%',
             },
         }
-        model = ScriptedModel([GATE, PLAN, QUERY, analyst, analyst, analyst])
+        plan = {**PLAN, 'subtasks': [{**PLAN['subtasks'][0], 'kind': 'calculate'}]}
+        model = ScriptedModel([GATE, plan, QUERY, analyst, analyst, analyst])
         with patch.object(bridge, 'missing_setup', return_value=[]), patch.object(
             bridge, 'load_retrieval', return_value=self.p3
         ), patch.object(bridge, '_make_client', return_value=model):
@@ -269,7 +280,7 @@ class LatestP4BridgeTests(unittest.TestCase):
         self.assertEqual(result.citations[0]['page'], 200)
         self.assertEqual(result.results[0]['chunk_ids'], ['expense-note'])
         self.assertEqual(result.metrics['tool_calls'], 1)
-        self.assertIn('expense-note', model.calls[3][0][-1]['content'])
+        self.assertIn('[E1] (HUL, FY24, hul_fy24 p.200, consolidated)', model.calls[3][0][-1]['content'])
         self.assertNotIn('distractor-0', model.calls[3][0][-1]['content'])
         self.assertNotIn('standalone-note', model.calls[3][0][-1]['content'])
 

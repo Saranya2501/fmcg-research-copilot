@@ -23,9 +23,9 @@ logs/
 cache/
 outputs/
 .pytest_cache/
-retrival/p3_retrieval/index_bundle.zip
-retrival/p3_retrieval/index/
-retrival/p3_retrieval/parsed/
+retrival/core/index_bundle.zip
+retrival/core/index/
+retrival/core/parsed/
 retrival/handoff/P3/index/*.zip
 retrival/handoff/P3/index/*.pkl
 retrival/handoff/P3/index/*.index

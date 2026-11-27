@@ -2,10 +2,10 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Callable
 from langgraph.graph import StateGraph, END
-from p4.state import AgentState
-from p4.config import MAX_STEPS_PER_SUBTASK, MAX_REPAIR_ROUNDS, TOOL_TIMEOUT_SECONDS, DEFAULT_TOKEN_BUDGET
-from p4.guards import gatekeeper, enforce_step_limit, enforce_repair_limit, enforce_token_budget
-from p4.schemas.models import CopilotResponse, Plan
+from agent.state import AgentState
+from agent.config import MAX_STEPS_PER_SUBTASK, MAX_REPAIR_ROUNDS, TOOL_TIMEOUT_SECONDS, DEFAULT_TOKEN_BUDGET
+from agent.guards import gatekeeper, enforce_step_limit, enforce_repair_limit, enforce_token_budget
+from agent.schemas.models import CopilotResponse, Plan
 
 def _invoke_with_timeout(fn, kwargs, timeout):
     with ThreadPoolExecutor(max_workers=1) as pool:

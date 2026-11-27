@@ -16,28 +16,26 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 if __package__:
     from .config import (COVERED_COMPANIES, MAX_CHUNK_CHARS, MAX_EVIDENCE_CHARS,
-                        MAX_EVIDENCE_CHUNKS, MAX_SUBTASKS)
-else:
-    from config import (COVERED_COMPANIES, MAX_CHUNK_CHARS, MAX_EVIDENCE_CHARS,
-                        MAX_EVIDENCE_CHUNKS, MAX_SUBTASKS)
-if __package__:
-    from .json_utils import JsonResult, call_json
-else:
-    from json_utils import JsonResult, call_json
-if __package__:
+                        MAX_EVIDENCE_CHUNKS, MAX_JSON_REPAIRS, MAX_SUBTASKS)
+    from .json_utils import AgentOutputError, JsonResult, call_json
     from .schemas import (AnalystOutput, AnswerOutput, Chunk, Citation, ConversationState, CriticIssue,
                          CriticOutput, GateOutput, PlanOutput, QueryOutput, SectionOutput, SubTask)
 else:
+    from config import (COVERED_COMPANIES, MAX_CHUNK_CHARS, MAX_EVIDENCE_CHARS,
+                        MAX_EVIDENCE_CHUNKS, MAX_JSON_REPAIRS, MAX_SUBTASKS)
+    from json_utils import AgentOutputError, JsonResult, call_json
     from schemas import (AnalystOutput, AnswerOutput, Chunk, Citation, ConversationState, CriticIssue,
                          CriticOutput, GateOutput, PlanOutput, QueryOutput, SectionOutput, SubTask)
 
 # Metrics that always need the calculator (agents-v2: the live check showed the
 # Planner labelling "EBITDA margin" and "% of revenue" as plain lookups).
 CALC_WORDS = re.compile(r"\b(margins?|percent(age)?|per cent|share of|ratios?|growth|grew|intensity|cagr|yoy)\b|%", re.I)
+PCT_WORDS = re.compile(r"\b(margins?|percent(age)?|per cent|share of|growth|grew|cagr|yoy|year-over-year)\b|%", re.I)
 CITE_MARK = re.compile(r"\[([A-Za-z0-9_.:-]+)\]")
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
@@ -64,8 +62,9 @@ def format_evidence(chunks: list[Chunk]) -> str:
     """Render chunks as numbered EVIDENCE blocks inside the token budget."""
     out, used = [], 0
     for c in chunks[:MAX_EVIDENCE_CHUNKS]:
-        meta = ", ".join(x for x in [c.company, c.fiscal_year, c.quarter, c.doc_type, c.standalone_consolidated,
-                                     f"{c.doc} p.{c.page}" if c.page else c.doc, c.section] if x)
+        meta = ", ".join(x for x in [c.company, c.fiscal_year, c.quarter, c.doc_type,
+                                     f"{c.doc} p.{c.page}" if c.page else c.doc, c.section,
+                                     c.standalone_consolidated if c.standalone_consolidated not in (None, "unknown") else None] if x)
         text = c.text[:MAX_CHUNK_CHARS]
         block = f"[{c.chunk_id}] ({meta})\n{text}"
         if used + len(block) > MAX_EVIDENCE_CHARS:
@@ -83,17 +82,22 @@ def _numbers_in(text: str) -> list[float]:
     return [float(x.replace(",", "")) for x in re.findall(r"-?\d[\d,]*\.?\d*", text) if x.strip(",")]
 
 
-def _quote_hint(chunk: Chunk, value: float) -> str:
-    """Show a valid quote built from the real source lines, joined by spaces, so a repair can copy it."""
-    lines = [ln.strip() for ln in chunk.text.splitlines()]
-    for i, line in enumerate(lines):
-        if any(abs(n - value) < 1e-6 for n in _numbers_in(line)):
-            start = i
-            while start > 0 and i - start < 6 and (not lines[start] or re.search(r"\d", lines[start])):
-                start -= 1
-            context = " ".join(x for x in lines[start:i + 1] if x)
-            return f'. A valid quote for {value} is exactly: "{context}" (or a shorter part of it that includes the number)'
-    return ""
+def _resolve(cid: str, chunks: list[Chunk]) -> str | None:
+    """Map whatever id the model wrote to a chunk's (short) id: exact, the real id, or a shortened
+    real id such as "c906" for "..._p0179_c906"."""
+    cid = str(cid).strip()
+    low = cid.lower()
+    for c in chunks:
+        if low == c.chunk_id.lower() or (c.source_id and low == c.source_id.lower()):
+            return c.chunk_id
+    for c in chunks:
+        if c.source_id and len(cid) >= 2 and c.source_id.lower().endswith("_" + low):
+            return c.chunk_id
+    return None
+
+
+def _resolve_marks(text: str, chunks: list[Chunk]) -> str:
+    return CITE_MARK.sub(lambda m: f"[{_resolve(m.group(1), chunks) or m.group(1)}]", text or "")
 
 
 def _fill_citations(citations: list[Citation], chunks: list[Chunk]) -> None:
@@ -105,6 +109,23 @@ def _fill_citations(citations: list[Citation], chunks: list[Chunk]) -> None:
             cit.doc, cit.page = c.doc, c.page
 
 
+# ------------------------------------------------------------ Fast path (no model call)
+HELP_REPLY = ("Hi! I answer questions about India's listed FMCG companies from their filings (FY17 to FY26): "
+              "reported figures, ratios such as A&P spend as % of revenue, company comparisons, management "
+              "commentary, and cited competitor briefs. Try: \"Rank Dabur, Marico and Emami by EBITDA margin in FY25.\"")
+SMALL_TALK = re.compile(
+    r"^\s*(hi+|hello+|hey+|hiya|yo|good (morning|afternoon|evening)|namaste|thanks?( you)?|thank u|thx|ok(ay)?|"
+    r"cool|great|bye|goodbye|help|\?|what can you do\??|who are you\??|how are you\??)[\s!.?]*$", re.I)
+
+
+def quick_route(user_message: str) -> str | None:
+    """Return a canned reply for greetings, thanks and help without any model call; None otherwise.
+    P4: call this first. If it returns text, show it and stop (agents-v6)."""
+    if not user_message.strip() or SMALL_TALK.match(user_message):
+        return HELP_REPLY
+    return None
+
+
 # ------------------------------------------------------------ Gatekeeper
 def run_gatekeeper(llm, user_message: str, state: ConversationState, tag: str = "") -> JsonResult:
     state_txt = json.dumps({k: v for k, v in state.model_dump().items() if k != "history"})
@@ -112,11 +133,33 @@ def run_gatekeeper(llm, user_message: str, state: ConversationState, tag: str = 
     msgs = [{"role": "system", "content": _load("gatekeeper")}]
     msgs += [{"role": m["role"], "content": m["content"][:600]} for m in history]
     msgs.append({"role": "user", "content": f"CONVERSATION STATE: {state_txt}\n\nUser: {user_message}"})
-    return call_json(llm, msgs, GateOutput, agent="gatekeeper", tag=tag)
+    res = call_json(llm, msgs, GateOutput, agent="gatekeeper", tag=tag)
+    g = res.obj
+    others = [c for c in g.companies if not _is_covered(c)]
+    if g.in_scope and g.use_case != "UC0" and others:       # code check, not left to the model (agents-v10.1)
+        g.in_scope, g.use_case, g.refusal_reason = False, "UC7", "out_of_scope"
+        g.refusal_message = (f"{', '.join(others)} {'is' if len(others) == 1 else 'are'} not among the companies I cover. "
+                             f"I can help with {', '.join(COVERED_COMPANIES)} (FY17 to FY26).")
+        res.local_fixes.append(f"refused: not covered {others}")
+    return res
+
+
+COVERED_KEYS = ["hul", "hindustan unilever", "itc", "nestle", "dabur", "britannia", "marico",
+                "godrej consumer", "gcpl", "colgate", "tata consumer", "tcpl", "emami"]
+GENERIC = re.compile(r"compan|fmcg|cpg|peer|industry|sector|market|all\b|listed", re.I)
+
+
+def _is_covered(name: str) -> bool:
+    """True for a covered company (any common spelling) or a generic phrase like 'FMCG companies'."""
+    n = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    return GENERIC.search(n) is not None or any(k in n for k in COVERED_KEYS)
 
 
 # ------------------------------------------------------------ Planner
 def run_planner(llm, gate: GateOutput, tag: str = "") -> JsonResult:
+    if gate.use_case in ("UC0", "UC7") or not gate.in_scope:
+        raise ValueError(f"run_planner called for {gate.use_case} / in_scope={gate.in_scope}: "
+                         "show gate.direct_reply or gate.refusal_message instead of planning")
     msgs = [{"role": "system", "content": _load("planner")},
             {"role": "user", "content": (f"Request ({gate.use_case}): {gate.resolved_question}\n"
                                          f"Companies: {gate.companies}  Metrics: {gate.metrics}  "
@@ -149,39 +192,59 @@ def run_query_writer(llm, subtask: SubTask, tag: str = "") -> JsonResult:
 
 
 # ------------------------------------------------------------ Analyst
-def run_analyst(llm, subtask: SubTask, chunks: list[Chunk], tag: str = "") -> JsonResult:
+def _run_analyst(llm, subtask: SubTask, chunks: list[Chunk], tag: str = "") -> JsonResult:
     by_id = {c.chunk_id: c for c in chunks}
     msgs = [{"role": "system", "content": _load("analyst")},
             {"role": "user", "content": f"Sub-task ({subtask.kind}): {subtask.question}\n\n"
                                         + format_evidence(chunks)}]
 
     def check(a: AnalystOutput) -> str:
-        """Grounding: every figure must be quoted from its chunk, and the quote must contain the number."""
+        """Grounding: the number must appear in its chunk and in its quote, and the quote's words must come from the chunk."""
         errs = []
-        counts = {}
         for v in a.values:
-            counts[v.label] = counts.get(v.label, 0) + 1
-        for label, n in counts.items():
-            if n > 1:
-                errs.append(f"label '{label}' is used for {n} different values; give each value a distinct label, "
-                            f"e.g. include the fiscal year ('{label} FY24' and '{label} FY23')")
-        for v in a.values:
+            v.chunk_id = _resolve(v.chunk_id, chunks) or v.chunk_id
             c = by_id.get(v.chunk_id)
             if c is None:
                 errs.append(f"chunk_id '{v.chunk_id}' is not in the evidence")
                 continue
-            if _norm(v.quote) not in _norm(c.text):
-                errs.append(f"quote for '{v.label}' is not an exact copy of text in chunk {v.chunk_id}"
-                            + _quote_hint(c, v.value))
+            # Real report tables put a row label and its numbers far apart (other years' columns
+            # in between), so an exact quote is too strict. Accept when the number itself appears
+            # in the chunk AND the quote's words appear in the chunk (agents-v5).
+            if not any(abs(n - v.value) < 1e-6 for n in _numbers_in(c.text)):
+                errs.append(f"value {v.value} for '{v.label}' does not appear anywhere in chunk {v.chunk_id}")
             if not any(abs(n - v.value) < 1e-6 for n in _numbers_in(v.quote)):
-                errs.append(f"value {v.value} for '{v.label}' does not appear in its quote. Use a quote containing the requested figure, or omit that value, list the missing metric in missing, and return null for any calculation that needs it.")
+                errs.append(f"value {v.value} for '{v.label}' does not appear in its quote; omit the value and list the metric in missing if no quoted figure supports it")
+            if _norm(v.quote) not in _norm(c.text):
+                words = [w for w in re.findall(r"[a-z]{3,}", _norm(v.quote))]
+                chunk_n = _norm(c.text)
+                if words and not all(w in chunk_n for w in words):
+                    errs.append(f"quote words for '{v.label}' are not in chunk {v.chunk_id}; "
+                                "copy the row label and the number from the chunk")
+        labels_all = [v.label for v in a.values]
+        dupes = sorted({l for l in labels_all if labels_all.count(l) > 1})
+        if dupes:
+            errs.append(f"labels must be unique; add the fiscal year to each, e.g. 'revenue from operations FY24' "
+                        f"and 'revenue from operations FY23' (duplicated: {dupes})")
+        if a.calculation and (subtask.kind == "lookup" or a.calculation.expression.strip().lower() in ("", "null", "none")):
+            a.calculation = None
+        if a.calculation:
+            # match variable labels loosely ("operating profit FY24" = "Operating Profit (FY24)") (agents-v10)
+            keyed = {_label_key(v.label): v.label for v in a.values}
+            a.calculation.variables = {var: keyed.get(_label_key(lab), lab)
+                                       for var, lab in a.calculation.variables.items()}
+            if a.calculation.result_unit is None:
+                a.calculation.result_unit = _infer_unit(a)
+        if (subtask.kind == "calculate" and PCT_WORDS.search(subtask.question) and a.values
+                and _final_unit(a) not in ("%", "x")):
+            errs.append("the question asks for a percentage: either extract the percentage the report prints, "
+                        "or extract the inputs and give a calculation with result_unit '%' (... * 100)")
+        if a.calculation and a.calculation.result_unit == "%" and "100" not in a.calculation.expression:
+            errs.append("a percentage result must multiply by 100, e.g. '(new - old) / old * 100'")
         if a.calculation:
             labels = {v.label for v in a.values}
             for var, label in a.calculation.variables.items():
                 if label not in labels:
-                    errs.append(f"variable '{var}' refers to '{label}', which is not an extracted value label; "
-                                f"extracted labels are {sorted(labels)}. Add a values entry with its own quote "
-                                f"for it, or remove it from the calculation")
+                    errs.append(f"variable '{var}' refers to '{label}', which is not an extracted value label")
             used = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", a.calculation.expression))
             unknown = used - set(a.calculation.variables)
             if unknown:
@@ -191,8 +254,25 @@ def run_analyst(llm, subtask: SubTask, chunks: list[Chunk], tag: str = "") -> Js
     return call_json(llm, msgs, AnalystOutput, agent="analyst", tag=tag, check=check)
 
 
+def _label_key(label: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", label.lower())
+
+
+def _infer_unit(a: AnalystOutput) -> str:
+    """Unit for a calculation whose result_unit was missing or unreadable."""
+    if "100" in a.calculation.expression:
+        return "%"
+    return "Rs crore" if any(v.unit in TO_CRORE for v in a.values) else "x"
+
+
+def _final_unit(a: AnalystOutput) -> str | None:
+    if a.calculation:
+        return a.calculation.result_unit or _infer_unit(a)
+    return a.values[0].unit if a.values else None
+
+
 # ------------------------------------------------------------ Writer (chat answer)
-def run_writer(llm, question: str, results: list[dict], chunks: list[Chunk], tag: str = "") -> JsonResult:
+def _run_writer(llm, question: str, results: list[dict], chunks: list[Chunk], tag: str = "") -> JsonResult:
     """results: one dict per finished sub-task, built by P4 after the calculator ran:
        {"subtask_id", "company", "metric", "fiscal_year", "value", "unit", "chunk_ids", "inputs"}"""
     chunk_ids = {c.chunk_id for c in chunks}
@@ -202,6 +282,9 @@ def run_writer(llm, question: str, results: list[dict], chunks: list[Chunk], tag
                                         + format_evidence(chunks)}]
 
     def check(a: AnswerOutput) -> str:
+        a.answer = _resolve_marks(a.answer, chunks)
+        for c in a.citations:
+            c.chunk_id = _resolve(c.chunk_id, chunks) or c.chunk_id
         errs = []
         if not a.refused and a.value is not None and result_values:
             if not any(abs(a.value - rv) <= 0.005 * max(abs(rv), 1e-9) for rv in result_values):
@@ -224,7 +307,7 @@ def run_writer(llm, question: str, results: list[dict], chunks: list[Chunk], tag
 
 
 # ------------------------------------------------------------ Writer (brief section)
-def run_section_writer(llm, section: str, request: str, results: list[dict], chunks: list[Chunk],
+def _run_section_writer(llm, section: str, request: str, results: list[dict], chunks: list[Chunk],
                        tag: str = "") -> JsonResult:
     chunk_ids = {c.chunk_id for c in chunks}
     guidance = SECTION_GUIDANCE.get(section, "")
@@ -234,6 +317,9 @@ def run_section_writer(llm, section: str, request: str, results: list[dict], chu
                                         + format_evidence(chunks)}]
 
     def check(s: SectionOutput) -> str:
+        s.text = _resolve_marks(s.text, chunks)
+        for c in s.citations:
+            c.chunk_id = _resolve(c.chunk_id, chunks) or c.chunk_id
         errs = []
         if len(s.text.split()) > 330:
             errs.append(f"text is {len(s.text.split())} words; the limit is 300")
@@ -254,7 +340,7 @@ def run_section_writer(llm, section: str, request: str, results: list[dict], chu
 
 
 # ------------------------------------------------------------ Critic
-def run_critic(llm, question: str, draft: AnswerOutput | SectionOutput, results: list[dict],
+def _run_critic(llm, question: str, draft: AnswerOutput | SectionOutput, results: list[dict],
                chunks: list[Chunk], tag: str = "") -> JsonResult:
     msgs = [{"role": "system", "content": _load("critic")},
             {"role": "user", "content": f"Question: {question}\n\nRESULTS: {json.dumps(results)}\n\n"
@@ -324,3 +410,125 @@ def rule_check_trends(draft, results: list[dict], chunks: list[Chunk]) -> list[C
             correct=f"Only one year of figures is available, so '{m.group(0)}' cannot be supported.",
             instruction=f"Remove the trend/judgement word '{m.group(0)}' or the sentence; state the figure only."))
     return issues
+
+
+# ------------------------------------------------------------ Short evidence ids (agents-v7)
+# Real chunk ids are long ("hul_annual_report_fy24_hul_annual_report_2024_p0179_c906"); the 8B model
+# shortens them to "c906" and the citation check rejects the answer. Agents now see E1..E5; code maps
+# every id in the output back to the real chunk id.
+def _alias(chunks: list[Chunk]):
+    fwd = {c.chunk_id: f"E{i + 1}" for i, c in enumerate(chunks)}
+    back = {v: k for k, v in fwd.items()}
+    return [c.model_copy(update={"chunk_id": fwd[c.chunk_id], "source_id": c.chunk_id}) for c in chunks], fwd, back
+
+
+def _swap_marks(text: str, table: dict) -> str:
+    return CITE_MARK.sub(lambda m: f"[{table.get(m.group(1), m.group(1))}]", text or "")
+
+
+def _alias_results(results: list[dict], fwd: dict) -> list[dict]:
+    return [dict(r, chunk_ids=[fwd.get(i, i) for i in r.get("chunk_ids", [])]) for r in results]
+
+
+def _back_citations(cits, back):
+    for c in cits:
+        c.chunk_id = back.get(c.chunk_id, c.chunk_id)
+
+
+def run_analyst(llm, subtask: SubTask, chunks: list[Chunk], tag: str = "") -> JsonResult:
+    al, fwd, back = _alias(chunks)
+    res = _run_analyst(llm, subtask, al, tag)
+    for v in res.obj.values:
+        v.chunk_id = back.get(v.chunk_id, v.chunk_id)
+    calc = res.obj.calculation
+    if calc is not None and (subtask.kind == "lookup" or calc.expression.strip().lower() in ("", "null", "none")):
+        res.obj.calculation = None                     # a lookup reports the figure itself (agents-v9)
+        res.local_fixes.append("calculation removed for lookup / empty expression")
+    return res
+
+
+def run_writer(llm, question: str, results: list[dict], chunks: list[Chunk], tag: str = "") -> JsonResult:
+    al, fwd, back = _alias(chunks)
+    res = _run_writer(llm, question, _alias_results(results, fwd), al, tag)
+    res.obj.answer = _swap_marks(res.obj.answer, back)
+    _back_citations(res.obj.citations, back)
+    return res
+
+
+def run_section_writer(llm, section: str, request: str, results: list[dict], chunks: list[Chunk],
+                       tag: str = "") -> JsonResult:
+    al, fwd, back = _alias(chunks)
+    res = _run_section_writer(llm, section, request, _alias_results(results, fwd), al, tag)
+    res.obj.text = _swap_marks(res.obj.text, back)
+    _back_citations(res.obj.citations, back)
+    return res
+
+
+def run_critic(llm, question: str, draft, results: list[dict], chunks: list[Chunk], tag: str = "") -> JsonResult:
+    """Never fails the answer: if the Critic's output is still invalid after repairs, the draft is kept,
+    the rule checks still run, and verified=False tells P4 to show it as unverified (agents-v10.2)."""
+    try:
+        return _run_critic_aliased(llm, question, draft, results, chunks, tag)
+    except AgentOutputError as e:
+        out = CriticOutput(verdict="pass", issues=[], verified=False)
+        for issue in rule_check_trends(draft, results, chunks):
+            out.issues.append(issue)
+        if out.issues:
+            out.verdict = "revise"
+        return JsonResult(obj=out, attempts=1 + MAX_JSON_REPAIRS, repairs=MAX_JSON_REPAIRS,
+                          local_fixes=["critic output unusable: draft kept, marked unverified"], errors=e.errors)
+
+
+def _run_critic_aliased(llm, question: str, draft, results: list[dict], chunks: list[Chunk], tag: str = "") -> JsonResult:
+    al, fwd, back = _alias(chunks)
+    d = draft.model_copy(deep=True)
+    if hasattr(d, "answer"):
+        d.answer = _swap_marks(d.answer, fwd)
+    if hasattr(d, "text"):
+        d.text = _swap_marks(d.text, fwd)
+    _back_citations(d.citations, fwd)
+    res = _run_critic(llm, question, d, _alias_results(results, fwd), al, tag)
+    for i in res.obj.issues:
+        i.claim, i.quote = _swap_marks(i.claim, back), _swap_marks(i.quote, back)
+    return res
+
+
+# ------------------------------------------------------------ Units and calculation (for P4)
+TO_CRORE = {"Rs crore": 1.0, "Rs lakh": 0.01, "Rs million": 0.1}
+
+
+def compute_result(analyst: AnalystOutput) -> tuple[float | None, str | None]:
+    """Convert every money value to Rs crore, then evaluate the calculation (if any).
+    Returns (value, unit). Money results are always labelled "Rs crore"."""
+    import ast
+    import operator as op
+    ops = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv, ast.USub: op.neg}
+
+    def ev(n, env):
+        if isinstance(n, ast.Expression):
+            return ev(n.body, env)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+            return float(n.value)
+        if isinstance(n, ast.Name):
+            return env[n.id]
+        if isinstance(n, ast.BinOp) and type(n.op) in ops:
+            return ops[type(n.op)](ev(n.left, env), ev(n.right, env))
+        if isinstance(n, ast.UnaryOp) and type(n.op) in ops:
+            return ops[type(n.op)](ev(n.operand, env))
+        raise ValueError("only numbers, variables and + - * / are allowed")
+
+    if not analyst.values:
+        return None, None
+    by_label = {v.label: v for v in analyst.values}
+    calc = analyst.calculation
+    if calc is None:
+        v = analyst.values[0]
+        if v.unit in TO_CRORE:
+            return round(v.value * TO_CRORE[v.unit], 2), "Rs crore"
+        return v.value, v.unit
+    env = {var: by_label[label].value * TO_CRORE.get(by_label[label].unit, 1.0)
+           for var, label in calc.variables.items()}
+    value = ev(ast.parse(calc.expression, mode="eval"), env)
+    result_unit = calc.result_unit or _infer_unit(analyst)
+    unit = "Rs crore" if result_unit in TO_CRORE else result_unit
+    return round(value, 2), unit

@@ -82,41 +82,6 @@ try:
 except AgentOutputError as e:
     ok("raises AgentOutputError after 2 repairs", len(llm.calls) == 3 and len(e.errors) == 3)
 
-# 5b. Flattened table: an invented heading-prefixed quote and an unextracted calculation input get actionable repair hints
-table = Chunk(chunk_id="itc1", doc="itc", company="ITC", fiscal_year="FY24",
-              text="Segment Revenue - Gross\nFMCG - Cigarettes\n30596.59 \nFMCG - Others\n20922.47 \nFMCG - Total\n51519.06")
-bad = json.dumps({"values": [{"label": "fmcg others", "value": 20922.47, "unit": "Rs crore", "chunk_id": "itc1",
-                              "quote": "Segment Revenue - FMCG - Others 20922.47"}],
-                  "calculation": {"expression": "o + c", "variables": {"o": "fmcg others", "c": "fmcg cigarettes"},
-                                  "result_unit": "Rs crore"}})
-good = json.dumps({"values": [{"label": "fmcg others", "value": 20922.47, "unit": "Rs crore", "chunk_id": "itc1",
-                               "quote": "FMCG - Others 20922.47"},
-                              {"label": "fmcg cigarettes", "value": 30596.59, "unit": "Rs crore", "chunk_id": "itc1",
-                               "quote": "FMCG - Cigarettes 30596.59"}],
-                   "calculation": {"expression": "o + c", "variables": {"o": "fmcg others", "c": "fmcg cigarettes"},
-                                   "result_unit": "Rs crore"}})
-llm = FakeLLM([bad, good])
-r = run_analyst(llm, sub, [table])
-hint = llm.calls[1]["messages"][-1]["content"]
-ok("table repair names the printed text and the missing value", r.repairs == 1 and '"FMCG - Others 20922.47"' in hint
-   and "|" not in hint.split("Errors:")[1].split("Required JSON schema")[0] and "Add a values entry" in hint)
-
-# 5c. Flattened row: the label is several lines above the number, and one label for two years is rejected
-row = Chunk(chunk_id="itc2", doc="itc", company="ITC", fiscal_year="FY24",
-            text="FMCG - Others\n20922.47 \n44.36 \n20966.83 \n19081.48 \nFMCG - Total\n51519.06")
-dup = json.dumps({"values": [
-    {"label": "FMCG - Others", "value": 20922.47, "unit": "Rs crore", "chunk_id": "itc2", "quote": "FMCG - Others 20922.47"},
-    {"label": "FMCG - Others", "value": 19081.48, "unit": "Rs crore", "chunk_id": "itc2", "quote": "FMCG - Others | 19081.48"}]})
-fixed = json.dumps({"values": [
-    {"label": "FMCG - Others FY24", "value": 20922.47, "unit": "Rs crore", "chunk_id": "itc2", "quote": "FMCG - Others 20922.47"},
-    {"label": "FMCG - Others FY23", "value": 19081.48, "unit": "Rs crore", "chunk_id": "itc2",
-     "quote": "FMCG - Others 20922.47 44.36 20966.83 19081.48"}]})
-llm = FakeLLM([dup, fixed])
-r = run_analyst(llm, sub, [row])
-hint = llm.calls[1]["messages"][-1]["content"]
-ok("duplicate label and pipe quote repaired with a valid row quote",
-   r.repairs == 1 and "used for 2 different values" in hint and '"FMCG - Others 20922.47 44.36 20966.83 19081.48"' in hint)
-
 # 6. Writer: value must be one of the RESULTS values
 llm = FakeLLM([load("writer_invalid_value.json"), load("writer_valid.json")])
 r = run_writer(llm, sub.question, results, [chunk])
@@ -200,5 +165,125 @@ ok("rule check leaves a factual section alone", r.obj.verdict == "pass" and not 
 two_years = results + [dict(results[0], fiscal_year="FY23", value=8.46)]
 r = run_critic(FakeLLM([load("critic_valid_pass.json")]), "Marketing intensity section", bad_trend, two_years, [chunk])
 ok("trend words allowed with 2+ years of results", r.obj.verdict == "pass")
+
+# ---- agents-v5: grounding works on real table layouts ---------------------
+sub_pct = sub
+sub = SubTask(id="t1", company="Example Foods", metric="profit after tax", fiscal_year="FY23",
+              kind="lookup", question="What was Example Foods' profit after tax in FY23?")
+table_chunk = Chunk(chunk_id="t1", company="Example Foods", doc="ExampleFoods_AR_FY24.pdf", page=45,
+                    text="10-year financial highlights (Rs million)\nProfit after Tax\n31,089\n23,905\n21,184")
+table_ok = json.dumps({"values": [{"label": "profit after tax", "value": 23905, "unit": "Rs million",
+                       "fiscal_year": "FY23", "chunk_id": "t1", "quote": "Profit after Tax 23,905"}],
+                       "calculation": None, "missing": []})
+r = run_analyst(FakeLLM([table_ok]), sub, [table_chunk])
+ok("table row label + number accepted without exact quote", r.repairs == 0 and r.obj.values[0].unit == "Rs million")
+table_bad = table_ok.replace("23905", "23950").replace("23,905", "23,950")
+r = run_analyst(FakeLLM([table_bad, table_ok]), sub, [table_chunk])
+ok("number not in the table still rejected", r.repairs == 1, r.errors[0][:70])
+
+# ---- agents-v6: small talk never reaches the Planner ----------------------
+from agents import quick_route  # noqa: E402
+ok("quick_route answers greetings with no model call",
+   all(quick_route(m) for m in ["hi", "Hello!", "thanks", "what can you do?", "", "ok"]))
+ok("quick_route passes real questions through",
+   quick_route("hi, what was Dabur's revenue in FY24?") is None and quick_route("HUL margin FY25") is None)
+uc0 = json.dumps({"use_case": "UC0", "in_scope": True, "companies": [], "metrics": [], "fiscal_years": [],
+                  "resolved_question": "good evening team", "direct_reply": "Hello! Ask me about FMCG filings."})
+g = run_gatekeeper(FakeLLM([uc0]), "good evening team", ConversationState()).obj
+ok("gatekeeper UC0 carries a direct reply", g.use_case == "UC0" and g.direct_reply)
+try:
+    run_planner(FakeLLM([]), g); ok("planner refuses UC0", False)
+except ValueError:
+    ok("planner refuses to plan UC0/UC7", True)
+
+# ---- agents-v7: long real chunk ids, empty calculations, unit labels ------
+from agents import compute_result  # noqa: E402
+from schemas import AnalystOutput  # noqa: E402
+long_id = "hul_annual_report_fy24_hul_annual_report_2024_p0179_c906"
+hul = Chunk(chunk_id=long_id, company="HUL", fiscal_year="FY24", doc="HUL_Annual_Report_2024.pdf", page=179,
+            text="Consolidated Statement of Profit and Loss. Revenue from operations 61,896 60,580")
+res = [{"subtask_id": "t1", "company": "HUL", "metric": "revenue", "fiscal_year": "FY24", "value": 61896.0,
+        "unit": "Rs crore", "chunk_ids": [long_id]}]
+short = json.dumps({"answer": "HUL's FY24 revenue from operations was Rs 61,896 crore [c906].", "value": 61896,
+                    "unit": "Rs crore", "fiscal_year": "FY24", "citations": [{"chunk_id": "c906"}], "refused": False})
+llm = FakeLLM([short])
+r = run_writer(llm, "HUL revenue FY24?", res, [hul])
+ok("model sees short id E1, not the long id", "[E1]" in llm.calls[0]["messages"][-1]["content"]
+   and long_id not in llm.calls[0]["messages"][-1]["content"])
+ok("shortened id [c906] accepted and mapped back to the real id",
+   r.repairs == 0 and r.obj.citations[0].chunk_id == long_id and f"[{long_id}]" in r.obj.answer, r.obj.answer[-30:])
+
+empty_calc = json.dumps({"values": [{"label": "revenue from operations", "value": 61896, "unit": "Rs crore",
+                         "fiscal_year": "FY24", "chunk_id": "E1", "quote": "Revenue from operations 61,896"}],
+                         "calculation": {"expression": "", "variables": {}, "result_unit": "Rs crore"}, "missing": []})
+r = run_analyst(FakeLLM([empty_calc]), sub, [hul])
+ok("empty calculation removed; value mapped to real chunk id",
+   r.obj.calculation is None and r.obj.values[0].chunk_id == long_id)
+ok("compute_result: plain lookup", compute_result(r.obj) == (61896.0, "Rs crore"))
+mil = AnalystOutput(values=[{"label": "pat", "value": 23905, "unit": "Rs million", "chunk_id": "x", "quote": "23,905"}],
+                    calculation={"expression": "pat", "variables": {"pat": "pat"}, "result_unit": "Rs million"})
+ok("compute_result converts million and labels the result Rs crore", compute_result(mil) == (2390.5, "Rs crore"))
+
+# ---- agents-v8: growth calculations on real pages --------------------------
+from agents import _resolve  # noqa: E402
+ok("lowercase 'e1' resolves", _resolve("e1", [Chunk(chunk_id="E1", company="x", doc="d", text="t")]) == "E1")
+dup = json.dumps({"values": [
+    {"label": "revenue from operations", "value": 61896, "unit": "Rs crore", "fiscal_year": "FY24", "chunk_id": "E1", "quote": "Revenue from operations 61,896"},
+    {"label": "revenue from operations", "value": 60580, "unit": "Rs crore", "fiscal_year": "FY23", "chunk_id": "E1", "quote": "61,896 60,580"}],
+    "calculation": {"expression": "(a - b) / b * 100", "variables": {"a": "revenue from operations", "b": "revenue from operations"}, "result_unit": "%"}, "missing": []})
+fixed = dup.replace('"revenue from operations", "value": 61896', '"revenue from operations FY24", "value": 61896').replace(
+    '"revenue from operations", "value": 60580', '"revenue from operations FY23", "value": 60580').replace(
+    '"a": "revenue from operations", "b": "revenue from operations"', '"a": "revenue from operations FY24", "b": "revenue from operations FY23"')
+r = run_analyst(FakeLLM([dup, fixed]), sub_pct, [hul])
+ok("duplicate labels sent back; growth computed correctly", r.repairs == 1 and compute_result(r.obj) == (2.17, "%"), r.errors[0][:60])
+no100 = fixed.replace(" * 100", "")
+r = run_analyst(FakeLLM([no100, fixed]), sub_pct, [hul])
+ok("percentage without * 100 sent back", r.repairs == 1, r.errors[0][:60])
+
+
+
+# ---- agents-v10 -------------------------------------------------------------
+from schemas import Calculation
+ok("unknown result unit becomes None", Calculation(expression="a/b", variables={}, result_unit="per unit").result_unit is None)
+pct_chunk = Chunk(chunk_id="p1", company="Example Foods", doc="ExampleFoods_AR_FY24.pdf", page=12,
+                  text="Operating Profit (FY24) 3,240 Revenue from operations (FY24) 16,000")
+loose = json.dumps({"values": [
+    {"label": "Operating Profit (FY24)", "value": 3240, "unit": "Rs crore", "fiscal_year": "FY24", "chunk_id": "p1", "quote": "Operating Profit (FY24) 3,240"},
+    {"label": "Revenue from operations (FY24)", "value": 16000, "unit": "Rs crore", "fiscal_year": "FY24", "chunk_id": "p1", "quote": "Revenue from operations (FY24) 16,000"}],
+    "calculation": {"expression": "op / rev * 100", "variables": {"op": "operating profit FY24", "rev": "revenue from operations FY24"}, "result_unit": "percent of revenue"},
+    "missing": []})
+sub_m = SubTask(id="t1", company="Example Foods", metric="operating margin", fiscal_year="FY24", kind="calculate",
+                question="What was Example Foods' operating profit margin in FY24?")
+r = run_analyst(FakeLLM([loose]), sub_m, [pct_chunk])
+ok("loose variable labels matched without a repair", r.repairs == 0, r.errors[:1])
+ok("calculator gives 20.25 %", compute_result(r.obj) == (20.25, "%"), compute_result(r.obj))
+money_only = json.dumps({"values": [loose and json.loads(loose)["values"][0]], "calculation": None, "missing": []})
+r = run_analyst(FakeLLM([money_only, loose]), sub_m, [pct_chunk])
+ok("margin question answered with a money figure is sent back", r.repairs == 1, r.errors[:1])
+
+# ---- agents-v10.1: companies outside the covered list are refused in code -----
+from schemas import ConversationState
+gate_amul = json.dumps({"use_case": "UC3", "in_scope": True, "refusal_reason": None, "refusal_message": None,
+                        "companies": ["Amul", "Patanjali", "HUL"], "metrics": ["profitability"], "fiscal_years": [],
+                        "resolved_question": "Rank Amul, Patanjali and HUL by profitability."})
+r = run_gatekeeper(FakeLLM([gate_amul]), "Rank Amul, Patanjali and HUL by profitability.", ConversationState())
+ok("unlisted companies refused even when the model says in scope",
+   not r.obj.in_scope and r.obj.use_case == "UC7" and r.obj.refusal_reason == "out_of_scope", r.obj.refusal_message)
+gate_ok = gate_amul.replace('"Amul", "Patanjali", "HUL"', '"Nestl\u00e9 India", "Hindustan Unilever", "Godrej Consumer Products"')
+r = run_gatekeeper(FakeLLM([gate_ok]), "Compare Nestle, HUL and GCPL", ConversationState())
+ok("covered companies in any spelling stay in scope", r.obj.in_scope)
+gate_generic = gate_amul.replace('"Amul", "Patanjali", "HUL"', '"listed FMCG companies"')
+r = run_gatekeeper(FakeLLM([gate_generic]), "Which listed FMCG companies had the highest margin?", ConversationState())
+ok("generic 'FMCG companies' is not treated as an unlisted company", r.obj.in_scope)
+
+# ---- agents-v10.2: the Critic can no longer fail an answer --------------------
+odd = json.dumps({"verdict": "revise", "issues": [{"claim": "x", "quote": "8.57%", "correct": "y",
+                  "problem": "misleading_comparison", "fix_owner": "the writer", "instruction": "z"}]})
+r = run_critic(FakeLLM([odd]), "Marketing intensity section", SectionOutput(**json.loads(load("section_valid.json"))), results, [chunk])
+ok("invented problem label mapped, not rejected", r.repairs == 0 and r.obj.issues[0].problem == "unsupported"
+   and r.obj.issues[0].fix_owner == "writer", r.obj.issues[0].problem)
+bad_quote = odd.replace('"8.57%"', '"words that are not in the draft"')
+r = run_critic(FakeLLM([bad_quote] * 3), "Marketing intensity section", SectionOutput(**json.loads(load("section_valid.json"))), results, [chunk])
+ok("unusable Critic output keeps the draft, marked unverified", r.obj.verified is False and r.obj.verdict == "pass")
 
 print(f"\nAll {passed} checks passed.")

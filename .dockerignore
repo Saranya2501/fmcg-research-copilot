@@ -10,6 +10,6 @@ Corpus
 backend/data
 .DS_Store
 **/index_bundle.zip
-retrival/p3_retrieval/index
-retrival/p3_retrieval/parsed
+retrival/core/index
+retrival/core/parsed
 **/.pytest_cache

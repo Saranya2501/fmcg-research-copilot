@@ -1,6 +1,6 @@
 # Competitive Research Copilot — P4 Agent & Tools
 
-The research runner combines the prompting agents in `integration/p2_agents/` with the retrieval code in `p3_retrieval/`. For credentials, research data, and launch commands, follow the [project quick start](../README.md#run-the-agent).
+The research runner combines the prompting agents in `integration/p2_agents/` with the retrieval code in `core/`. For credentials, research data, and launch commands, follow the [project quick start](../README.md#run-the-agent).
 
 ## Developer checks
 

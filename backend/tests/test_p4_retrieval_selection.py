@@ -13,7 +13,7 @@ from integrations import agent_bridge
 
 class P4RetrievalSelectionTests(unittest.TestCase):
     def test_company_aliases_match_corpus_labels_and_preserve_year_filter(self):
-        retrieval = agent_bridge.load_retrieval(agent_bridge.P4_ROOT / 'p3_retrieval')
+        retrieval = agent_bridge.load_retrieval(agent_bridge.P4_ROOT / 'core')
         chunks = {
             'hul24': {'company': 'HUL', 'fiscal_year': 'FY24'},
             'hul23': {'company': 'HUL', 'fiscal_year': 'FY23'},
@@ -29,7 +29,7 @@ class P4RetrievalSelectionTests(unittest.TestCase):
 
     def test_default_is_p4_bundled_retrieval(self):
         with patch.dict(os.environ,{'P3_RAG_PATH':''}):
-            self.assertEqual(agent_bridge.rag_path(),(agent_bridge.P4_ROOT/'p3_retrieval').resolve())
+            self.assertEqual(agent_bridge.rag_path(),(agent_bridge.P4_ROOT/'core').resolve())
         requirements=(Path(__file__).resolve().parents[1]/'requirements.txt').read_text()
         self.assertIn('faiss-cpu',requirements)
         self.assertIn('rank-bm25',requirements)
@@ -49,7 +49,7 @@ class P4RetrievalSelectionTests(unittest.TestCase):
         settings = {'IITK_EMBED_URL': 'https://example.invalid/embeddings',
                     'IITK_EMBED_KEY': 'test', 'RAG_RERANKER_ENABLED': 'false'}
         with patch.dict(os.environ, settings), patch('builtins.__import__', side_effect=import_without_local_models):
-            retrieval = runpy.run_path(str(agent_bridge.P4_ROOT/'p3_retrieval'/'retrieve.py'))
+            retrieval = runpy.run_path(str(agent_bridge.P4_ROOT/'core'/'retrieve.py'))
             retrieval['_load_models']()
             with self.assertRaisesRegex(RuntimeError, 'requirements-local-models.txt'):
                 retrieval['_local_model_classes']()

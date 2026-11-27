@@ -11,10 +11,10 @@ Run these steps from the repository root. Use Docker with Compose v2.24 or later
 
 ### 1. Add the research data
 
-Get the matching index bundle and `all_chunks.jsonl` from the [shared submission folder](https://drive.google.com/drive/folders/1-WKMvaOx8v3jJAcwN_jSKkMa3AHC1OR-). Extract `index_bundle.zip` into `retrival/p3_retrieval/` and put `all_chunks.jsonl` in its `parsed/` directory. Use all four files from the same rebuild. They should be here:
+Get the matching index bundle and `all_chunks.jsonl` from the [shared submission folder](https://drive.google.com/drive/folders/1-WKMvaOx8v3jJAcwN_jSKkMa3AHC1OR-). Extract `index_bundle.zip` into `retrival/core/` and put `all_chunks.jsonl` in its `parsed/` directory. Use all four files from the same rebuild. They should be here:
 
 ```text
-retrival/p3_retrieval/
+retrival/core/
 ├── index/
 │   ├── bm25.pkl
 │   ├── chunk_ids.json
@@ -71,7 +71,7 @@ Open [FMCG Research Copilot](http://localhost:8501) and try asking how HUL's rev
 | `LLM_LOG_PATH`, `LLM_LOCK_PATH` | Model-call logging and locking | The template uses `backend/data/logs/llm_calls.jsonl` and `backend/data/llm_api.lock`. |
 | `CHAT_HISTORY_DB` | Custom conversation database | Optional absolute path. The default is `backend/data/chat_history.sqlite3`. |
 | `REDIS_URL` | Local Redis with Search support | Optional for direct Python runs. Leave unset for standard setup. |
-| `P3_RAG_PATH`, `P2_PACKAGE_PATH` | Custom retrieval or prompting package location | Optional absolute paths. The project uses `retrival/p3_retrieval/` and `retrival/integration/p2_agents/` by default. |
+| `P3_RAG_PATH`, `P2_PACKAGE_PATH` | Custom retrieval or prompting package location | Optional absolute paths. The project uses `retrival/core/` and `retrival/integration/p2_agents/` by default. |
 | `INSTALL_LOCAL_MODELS` | Optional Docker build | Set to `true` and use the build command in [Optional local models](#optional-local-models). |
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` | Langfuse tracing | Your project’s public key, secret key, and regional or self-hosted URL. |
 | `LANGFUSE_TRACING_ENABLED`, `LANGFUSE_ENVIRONMENT` | Tracing controls | The template uses `true` and `development`. |
@@ -104,7 +104,7 @@ See [deployment details](backend/README.md) for model and tracing options.
 |---|---|---|
 | P1 — Spec, eval & safety | Yogesh | [Evaluation dataset](retrival/evaluation/gold_v1_with_context.jsonl) and [evidence contract](retrival/references/P1_RESPONSE_AND_EVIDENCE_CONTRACT.md) |
 | P2 — Prompting & API client | Himanshu | `retrival/integration/p2_agents/` |
-| P3 — Retrieval (RAG) | Saranya | `retrival/p3_retrieval/` |
+| P3 — Retrieval (RAG) | Saranya | `retrival/core/` |
 | P4 — Agent & tools | Rohit | `retrival/` |
 | P5 — Observability & deployment | Irfan | `backend/` |
 

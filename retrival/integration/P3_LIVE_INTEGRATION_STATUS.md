@@ -1,7 +1,7 @@
 # P3 integration status (updated 26 November 2026)
 
 ## Available and included
-- P3 retrieval implementation: `p4-agent/p3_retrieval/retrieve.py` (repository-root path).
+- P3 retrieval implementation: `p4-agent/core/retrieve.py` (repository-root path).
 - Matching hybrid indexes and the full `parsed/all_chunks.jsonl` are supplied separately through the [shared Drive folder](https://drive.google.com/drive/folders/1-WKMvaOx8v3jJAcwN_jSKkMa3AHC1OR-).
 - P4 `RetrievalAdapter.from_p3_path()` can import the P3 API once its runtime files are placed correctly.
 
@@ -14,7 +14,7 @@ The parsed corpus is required for filtering, citations/chunk lookup, and
 
 Expected runtime layout:
 ```
-p4-agent/p3_retrieval/
+p4-agent/core/
   retrieve.py
   index/
     bm25.pkl

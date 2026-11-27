@@ -1,5 +1,5 @@
 import re
-from p4.config import (
+from agent.config import (
     PROHIBITED_PATTERNS, MAX_STEPS_PER_SUBTASK, MAX_REPAIR_ROUNDS,
     UNLISTED_OR_UNSUPPORTED,
 )

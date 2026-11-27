@@ -1,4 +1,4 @@
-from p4.config import METRIC_SYNONYMS
+from agent.config import METRIC_SYNONYMS
 
 def metric_lookup(metric: str) -> dict:
     key = metric.strip().lower()

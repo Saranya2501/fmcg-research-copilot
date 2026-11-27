@@ -4,7 +4,7 @@
 - P4 LangGraph workflow, state, schemas, tools, guardrails, and tests.
 - Python runtime integration layer and CLI (`app/run_research.py`), using the P2 agent interface and P3 retrieval adapter.
 - P2 agent source/interface retained under `integration/p2_agents/` for the current integration baseline.
-- P3 retrieval source and index bundle retained under `p3_retrieval/`.
+- P3 retrieval source and index bundle retained under `core/`.
 - P1 gold dataset/evidence contract and P3 corpus manifest retained in `data/` and `references/` where supplied.
 - Documentation, test suite, Colab/setup materials.
 
