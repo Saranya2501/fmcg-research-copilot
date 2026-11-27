@@ -11,7 +11,7 @@ Run these steps from the repository root. Use Docker with Compose v2.24 or later
 
 ### 1. Add the research data
 
-Get the matching index bundle and `all_chunks.jsonl` from the team's Google Drive folder `My Drive/fmcg-research-copilot/p3-retrieval/`. Extract `index_bundle.zip` into `retrival/p3_retrieval/` and put `all_chunks.jsonl` in its `parsed/` directory. The four files should be here:
+Get the matching index bundle and `all_chunks.jsonl` from the [shared submission folder](https://drive.google.com/drive/folders/1-WKMvaOx8v3jJAcwN_jSKkMa3AHC1OR-). Extract `index_bundle.zip` into `retrival/p3_retrieval/` and put `all_chunks.jsonl` in its `parsed/` directory. Use all four files from the same rebuild. They should be here:
 
 ```text
 retrival/p3_retrieval/
@@ -34,6 +34,8 @@ cp -n backend/.env.example backend/.env
 Fill in `LLM_BASE_URL` (without `/chat/completions`), `LLM_API_KEY`, `LLM_MODEL`, `IITK_EMBED_URL`, and `IITK_EMBED_KEY`. Keep `RAG_RERANKER_ENABLED=false` for the standard setup.
 
 If you use the institute endpoints, put the supplied CA files in `backend/certs/` and set `LLM_CA_CERT=backend/certs/vm07-ca.crt` and `CACERT_PATH=../../backend/certs/vm02-ca.crt`.
+
+IITK endpoints require separately authorized credentials. Keep API keys out of Git and the shared submission folder.
 
 ### 3. Start the app
 
