@@ -23,6 +23,12 @@ logs/
 cache/
 outputs/
 .pytest_cache/
+
+# Local agent tooling
+/.agent/
+/.agents/
+/.claude/
+
 retrival/core/index_bundle.zip
 retrival/core/index/
 retrival/core/parsed/
