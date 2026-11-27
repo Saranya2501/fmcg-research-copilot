@@ -82,6 +82,41 @@ try:
 except AgentOutputError as e:
     ok("raises AgentOutputError after 2 repairs", len(llm.calls) == 3 and len(e.errors) == 3)
 
+# 5b. Flattened table: an invented heading-prefixed quote and an unextracted calculation input get actionable repair hints
+table = Chunk(chunk_id="itc1", doc="itc", company="ITC", fiscal_year="FY24",
+              text="Segment Revenue - Gross\nFMCG - Cigarettes\n30596.59 \nFMCG - Others\n20922.47 \nFMCG - Total\n51519.06")
+bad = json.dumps({"values": [{"label": "fmcg others", "value": 20922.47, "unit": "Rs crore", "chunk_id": "itc1",
+                              "quote": "Segment Revenue - FMCG - Others 20922.47"}],
+                  "calculation": {"expression": "o + c", "variables": {"o": "fmcg others", "c": "fmcg cigarettes"},
+                                  "result_unit": "Rs crore"}})
+good = json.dumps({"values": [{"label": "fmcg others", "value": 20922.47, "unit": "Rs crore", "chunk_id": "itc1",
+                               "quote": "FMCG - Others 20922.47"},
+                              {"label": "fmcg cigarettes", "value": 30596.59, "unit": "Rs crore", "chunk_id": "itc1",
+                               "quote": "FMCG - Cigarettes 30596.59"}],
+                   "calculation": {"expression": "o + c", "variables": {"o": "fmcg others", "c": "fmcg cigarettes"},
+                                   "result_unit": "Rs crore"}})
+llm = FakeLLM([bad, good])
+r = run_analyst(llm, sub, [table])
+hint = llm.calls[1]["messages"][-1]["content"]
+ok("table repair names the printed text and the missing value", r.repairs == 1 and '"FMCG - Others 20922.47"' in hint
+   and "|" not in hint.split("Errors:")[1].split("Required JSON schema")[0] and "Add a values entry" in hint)
+
+# 5c. Flattened row: the label is several lines above the number, and one label for two years is rejected
+row = Chunk(chunk_id="itc2", doc="itc", company="ITC", fiscal_year="FY24",
+            text="FMCG - Others\n20922.47 \n44.36 \n20966.83 \n19081.48 \nFMCG - Total\n51519.06")
+dup = json.dumps({"values": [
+    {"label": "FMCG - Others", "value": 20922.47, "unit": "Rs crore", "chunk_id": "itc2", "quote": "FMCG - Others 20922.47"},
+    {"label": "FMCG - Others", "value": 19081.48, "unit": "Rs crore", "chunk_id": "itc2", "quote": "FMCG - Others | 19081.48"}]})
+fixed = json.dumps({"values": [
+    {"label": "FMCG - Others FY24", "value": 20922.47, "unit": "Rs crore", "chunk_id": "itc2", "quote": "FMCG - Others 20922.47"},
+    {"label": "FMCG - Others FY23", "value": 19081.48, "unit": "Rs crore", "chunk_id": "itc2",
+     "quote": "FMCG - Others 20922.47 44.36 20966.83 19081.48"}]})
+llm = FakeLLM([dup, fixed])
+r = run_analyst(llm, sub, [row])
+hint = llm.calls[1]["messages"][-1]["content"]
+ok("duplicate label and pipe quote repaired with a valid row quote",
+   r.repairs == 1 and "used for 2 different values" in hint and '"FMCG - Others 20922.47 44.36 20966.83 19081.48"' in hint)
+
 # 6. Writer: value must be one of the RESULTS values
 llm = FakeLLM([load("writer_invalid_value.json"), load("writer_valid.json")])
 r = run_writer(llm, sub.question, results, [chunk])

@@ -137,6 +137,8 @@ class LatestP4BridgeTests(unittest.TestCase):
         self.assertEqual(result.status,'partial')
         self.assertFalse(result.cacheable)
         self.assertNotIn('HUL revenue was',result.answer)
+        self.assertIn('wrong number', result.answer)
+        self.assertIn('Reviewer feedback: Recheck the claim.', result.limitations)
 
     def test_refusal_contract_is_normalized(self):
         gate={**GATE,'in_scope':False,'refusal_reason':'advice_or_forecast','refusal_message':'No investment advice.'}

@@ -83,6 +83,19 @@ def _numbers_in(text: str) -> list[float]:
     return [float(x.replace(",", "")) for x in re.findall(r"-?\d[\d,]*\.?\d*", text) if x.strip(",")]
 
 
+def _quote_hint(chunk: Chunk, value: float) -> str:
+    """Show a valid quote built from the real source lines, joined by spaces, so a repair can copy it."""
+    lines = [ln.strip() for ln in chunk.text.splitlines()]
+    for i, line in enumerate(lines):
+        if any(abs(n - value) < 1e-6 for n in _numbers_in(line)):
+            start = i
+            while start > 0 and i - start < 6 and (not lines[start] or re.search(r"\d", lines[start])):
+                start -= 1
+            context = " ".join(x for x in lines[start:i + 1] if x)
+            return f'. A valid quote for {value} is exactly: "{context}" (or a shorter part of it that includes the number)'
+    return ""
+
+
 def _fill_citations(citations: list[Citation], chunks: list[Chunk]) -> None:
     """Overwrite doc and page from the evidence, so the model can never invent a file name."""
     by_id = {c.chunk_id: c for c in chunks}
@@ -145,20 +158,30 @@ def run_analyst(llm, subtask: SubTask, chunks: list[Chunk], tag: str = "") -> Js
     def check(a: AnalystOutput) -> str:
         """Grounding: every figure must be quoted from its chunk, and the quote must contain the number."""
         errs = []
+        counts = {}
+        for v in a.values:
+            counts[v.label] = counts.get(v.label, 0) + 1
+        for label, n in counts.items():
+            if n > 1:
+                errs.append(f"label '{label}' is used for {n} different values; give each value a distinct label, "
+                            f"e.g. include the fiscal year ('{label} FY24' and '{label} FY23')")
         for v in a.values:
             c = by_id.get(v.chunk_id)
             if c is None:
                 errs.append(f"chunk_id '{v.chunk_id}' is not in the evidence")
                 continue
             if _norm(v.quote) not in _norm(c.text):
-                errs.append(f"quote for '{v.label}' is not an exact copy of text in chunk {v.chunk_id}")
+                errs.append(f"quote for '{v.label}' is not an exact copy of text in chunk {v.chunk_id}"
+                            + _quote_hint(c, v.value))
             if not any(abs(n - v.value) < 1e-6 for n in _numbers_in(v.quote)):
-                errs.append(f"value {v.value} for '{v.label}' does not appear in its quote")
+                errs.append(f"value {v.value} for '{v.label}' does not appear in its quote. Use a quote containing the requested figure, or omit that value, list the missing metric in missing, and return null for any calculation that needs it.")
         if a.calculation:
             labels = {v.label for v in a.values}
             for var, label in a.calculation.variables.items():
                 if label not in labels:
-                    errs.append(f"variable '{var}' refers to '{label}', which is not an extracted value label")
+                    errs.append(f"variable '{var}' refers to '{label}', which is not an extracted value label; "
+                                f"extracted labels are {sorted(labels)}. Add a values entry with its own quote "
+                                f"for it, or remove it from the calculation")
             used = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", a.calculation.expression))
             unknown = used - set(a.calculation.variables)
             if unknown:

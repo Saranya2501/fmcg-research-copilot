@@ -6,6 +6,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -22,6 +23,8 @@ if str(P4_ROOT) not in sys.path:
 from integration.runtime import run_query
 
 logger = logging.getLogger(__name__)
+
+STANDALONE_REQUEST = re.compile(r'\bstand[- ]?alone\b', re.I)
 
 RAG_FILES = (
     "retrieve.py", "index/bm25.pkl", "index/faiss.index",
@@ -228,9 +231,15 @@ def run_agent(question, history, filters, config, *, on_progress=None):
         enter_step("retrieve")
         actual=dict(filters or {})
         actual.update(request_filters)
+        # Reports state figures on both bases; default to consolidated unless the user asked otherwise.
+        default_scope='standalone_consolidated' not in actual and not STANDALONE_REQUEST.search(question)
+        if default_scope: actual['standalone_consolidated']='consolidated'
         metrics['tool_calls']+=1
         with _span('search-reports','retriever',{'query':query,'filters':actual}) as obs:
             rows=p3.retrieve(query=query,k=k,filters=actual)
+            if default_scope and not rows:
+                actual.pop('standalone_consolidated')
+                rows=p3.retrieve(query=query,k=k,filters=actual)
             for row in rows or []:
                 if row.get('chunk_id'): evidence[row['chunk_id']]=row
             update_observation(obs,output=rows)
@@ -303,6 +312,19 @@ def normalize_response(raw,evidence,context,usage,metrics):
         return ChatResponse(raw.get('message') or 'This request is outside the supported scope.',
                             status='refused',agent_context=context,usage=usage,metrics=metrics)
     if status!='answered':
+        critic = raw.get('critic') or {}
+        if critic.get('verdict') == 'revise' and critic.get('issues'):
+            issues = critic['issues']
+            reasons = [issue['problem'].replace('_', ' ') for issue in issues]
+            summary = ', '.join(dict.fromkeys(reasons))
+            return ChatResponse(
+                f'The answer needs revision. The source check flagged: {summary}.',
+                successful=False, status='partial', results=raw.get('results', []),
+                limitations=[*limitations, *(
+                    f"Reviewer feedback: {issue['instruction']}" for issue in issues
+                )],
+                agent_context=context, usage=usage, metrics=metrics,
+            )
         return ChatResponse('I could not verify an answer from the available evidence.',successful=False,status='partial',
             results=raw.get('results',[]),limitations=limitations or ['P4 validation incomplete'],
             agent_context=context,usage=usage,metrics=metrics)
