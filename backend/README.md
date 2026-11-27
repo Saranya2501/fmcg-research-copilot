@@ -16,7 +16,7 @@ FAISS, NumPy and BM25 are needed to search the prebuilt indexes.
 
 For local query embeddings or reranking, install `requirements-local-models.txt`.
 For Docker set `INSTALL_LOCAL_MODELS=true` in `.env` and build from the root with
-`docker compose --env-file p5-deployment/.env up --build -d`.
+`docker compose --env-file backend/.env up --build -d`.
 These packages serve queries; they do not rebuild the index.
 
 ## Run with Docker
@@ -32,7 +32,7 @@ setup. Compose clears this setting for Docker runs.
 ## Saved conversations
 
 Every new conversation gets a UUID stored with its history. Messages, their roles,
-and UTC timestamps are stored in `p5-deployment/data/chat_history.sqlite3`.
+and UTC timestamps are stored in `backend/data/chat_history.sqlite3`.
 The sidebar's Chat history lists chats using the first six words of their first
 user message as the title. Click a title to reopen and continue a chat, including after restarting
 the app. New chat creates a separate conversation and keeps the previous history.
@@ -58,19 +58,19 @@ From the repository root, using Python 3.11 or later:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r p5-deployment/requirements.txt
-cp -n p5-deployment/.env.example p5-deployment/.env
-streamlit run p5-deployment/app.py
+python -m pip install -r backend/requirements.txt
+cp -n backend/.env.example backend/.env
+streamlit run backend/app.py
 ```
 
-Edit `p5-deployment/.env` to configure rate limits, the optional history path, and
+Edit `backend/.env` to configure rate limits, the optional history path, and
 Langfuse credentials. The app loads this file automatically; existing environment
 variables take priority. Restart Streamlit after changing configuration. `.env` is
 excluded from Git.
 
 ## Connect your API
 
-Set one group of LLM variables in `p5-deployment/.env` and restart Streamlit:
+Set one group of LLM variables in `backend/.env` and restart Streamlit:
 
 ```dotenv
 LLM_BASE_URL=https://your-endpoint/v1
@@ -96,7 +96,7 @@ corpus/index files.
 
 The app uses Langfuse Python SDK 5.2.0 (for Langfuse Cloud / platform v4).
 Fill `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` in
-`p5-deployment/.env`, then restart Streamlit. Docker Compose also passes this
+`backend/.env`, then restart Streamlit. Docker Compose also passes this
 optional file into the container without baking credentials into the image.
 
 Each accepted chat turn creates a `process-chat-turn` trace, with a child
@@ -123,9 +123,9 @@ Restart the app after changing keys or tracing configuration.
 Run the offline tracing checks:
 
 ```bash
-.venv/bin/python -m unittest discover -s p5-deployment/tests -v
-PYTHONPATH=p4-agent .venv/bin/python -m pytest p4-agent/tests p4-agent/integration/tests -q
-.venv/bin/python p4-agent/integration/p2_agents/tests/test_agents.py
+.venv/bin/python -m unittest discover -s backend/tests -v
+PYTHONPATH=retrival .venv/bin/python -m pytest retrival/tests retrival/integration/tests -q
+.venv/bin/python retrival/integration/p2_agents/tests/test_agents.py
 ```
 
 ## Response cache and answer trace links
@@ -167,13 +167,13 @@ The cache is tested through the supplied P4 runner with scripted model replies a
 ## Latest P4 integration
 
 `integrations/agent_bridge.py` calls the entry point documented by the new P4 package:
-`p4-agent/integration/runtime.py::run_query(question, p2_path, p3_path, llm=...)`.
+`retrival/integration/runtime.py::run_query(question, p2_path, p3_path, llm=...)`.
 It does not invoke the old P4 graph rewrite. The supplied P4/P2 source is preserved;
 the adapter loads P2 into an isolated import namespace, avoiding collisions with
 flat module names such as `config`, `schemas` and `agents`.
 
-P2 defaults to `p4-agent/integration/p2_agents`; override with `P2_PACKAGE_PATH`.
-Retrieval defaults to `p4-agent/p3_retrieval` inside the supplied P4 package.
+P2 defaults to `retrival/integration/p2_agents`; override with `P2_PACKAGE_PATH`.
+Retrieval defaults to `retrival/p3_retrieval` inside the supplied P4 package.
 Use `P3_RAG_PATH` to override the location.
 The retrieval directory must contain `retrieve.py`, `index/bm25.pkl`, `index/faiss.index`,
 `index/chunk_ids.json`, and `parsed/all_chunks.jsonl`. The supplied index files
@@ -212,7 +212,7 @@ but preserves the limit. Configure it before launching:
 ```bash
 export CHAT_RATE_LIMIT=5
 export CHAT_RATE_WINDOW_SECONDS=60
-streamlit run p5-deployment/app.py
+streamlit run backend/app.py
 ```
 
 Both values must be positive integers. This session limit can reset on a new browser
@@ -261,7 +261,7 @@ a name is a display label, not authenticated identity.
 
 ## Optional reranker
 
-Set `RAG_RERANKER_ENABLED=false` in `p5-deployment/.env` to skip the local
+Set `RAG_RERANKER_ENABLED=false` in `backend/.env` to skip the local
 BGE reranker and its download. Retrieval still combines BM25 and dense search,
 returning passages in reciprocal-rank fusion order. Set it to `true` and install `requirements-local-models.txt`
 to enable reranking. The lightweight environment template defaults to `false`. Restart Streamlit after changing this setting; an already

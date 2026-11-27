@@ -111,7 +111,7 @@ def _local_model_classes():
     except ImportError as exc:
         raise RuntimeError(
             "Local query embeddings/reranking require the optional dependencies: "
-            "pip install -r p5-deployment/requirements-local-models.txt. "
+            "pip install -r backend/requirements-local-models.txt. "
             "For the lightweight runtime, configure IITK_EMBED_URL and IITK_EMBED_KEY "
             "and set RAG_RERANKER_ENABLED=false."
         ) from exc

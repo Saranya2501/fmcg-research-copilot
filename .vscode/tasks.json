@@ -2,9 +2,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Satrt server",
+            "label": "Start Streamlit server",
             "type": "shell",
-            "command": ".venv/bin/python -m streamlit run p5-deployment/app.py",
+            "command": ".venv/bin/python -m streamlit run backend/app.py",
             "inAgents": true
         }
     ]

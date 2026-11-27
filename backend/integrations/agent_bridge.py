@@ -17,7 +17,7 @@ from integrations.tracing import get_tracing_client, trace_step, update_observat
 from integrations.api_connection import connection, compatible_client
 
 ROOT = Path(__file__).resolve().parents[2]
-P4_ROOT = ROOT / "p4-agent"
+P4_ROOT = ROOT / "retrival"
 if str(P4_ROOT) not in sys.path:
     sys.path.insert(0, str(P4_ROOT))
 from integration.runtime import run_query
@@ -120,7 +120,7 @@ class MeteredClient:
 
 def _make_client(client_module):
     for key,relative in (('LLM_LOG_PATH','logs/llm_calls.jsonl'),('LLM_CACHE_PATH','llm_cache.sqlite'),('LLM_LOCK_PATH','llm_api.lock')):
-        os.environ.setdefault(key,str(ROOT/'p5-deployment/data'/relative))
+        os.environ.setdefault(key,str(ROOT/'backend/data'/relative))
     Path(os.environ['LLM_LOCK_PATH']).expanduser().parent.mkdir(parents=True,exist_ok=True)
     if get_tracing_client() is not None:
         from langfuse.openai import OpenAI

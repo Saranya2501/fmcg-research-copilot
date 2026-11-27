@@ -18,15 +18,15 @@ Corpus/
 Thumbs.db
 
 # Local conversation history
-p5-deployment/data/
+backend/data/
 logs/
 cache/
 outputs/
 .pytest_cache/
-p4-agent/p3_retrieval/index_bundle.zip
-p4-agent/p3_retrieval/index/
-p4-agent/p3_retrieval/parsed/
-p4-agent/handoff/P3/index/*.zip
-p4-agent/handoff/P3/index/*.pkl
-p4-agent/handoff/P3/index/*.index
-p4-agent/handoff/P3/parsed/*.jsonl
+retrival/p3_retrieval/index_bundle.zip
+retrival/p3_retrieval/index/
+retrival/p3_retrieval/parsed/
+retrival/handoff/P3/index/*.zip
+retrival/handoff/P3/index/*.pkl
+retrival/handoff/P3/index/*.index
+retrival/handoff/P3/parsed/*.jsonl

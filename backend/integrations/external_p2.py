@@ -43,7 +43,7 @@ def _load_p2(folder, revision):
 
 
 def load_p2(folder):
-    bundled = Path(__file__).resolve().parents[2] / "p4-agent/integration/p2_agents"
+    bundled = Path(__file__).resolve().parents[2] / "retrival/integration/p2_agents"
     if Path(folder).resolve() == bundled:
         from integration.p2_agents import agents, config, json_utils, llm_client, schemas
         return {"agents": agents, "config": config, "json_utils": json_utils,

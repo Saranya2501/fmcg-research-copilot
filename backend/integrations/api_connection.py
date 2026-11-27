@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import sqlite3
+import ssl
 import threading
 from urllib.parse import urlsplit
 
@@ -48,8 +49,9 @@ def compatible_client(module, openai_class, settings):
             self.target='compatible'
             self.base_url,self.model=settings.base_url,settings.model
             self.thinking_switch='none'
+            verify = ssl.create_default_context(cafile=str(Path(settings.tls_ca).expanduser())) if settings.tls_ca else True
             self._client=openai_class(base_url=self.base_url,api_key=settings.api_key,max_retries=0,
-                http_client=httpx.Client(verify=str(Path(settings.tls_ca).expanduser()) if settings.tls_ca else True,
+                http_client=httpx.Client(verify=verify,
                                         timeout=httpx.Timeout(120.0,connect=15.0)))
             self.log_path=Path(os.getenv('LLM_LOG_PATH','logs/llm_calls.jsonl'))
             self.log_path.parent.mkdir(parents=True,exist_ok=True)

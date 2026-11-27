@@ -10,7 +10,7 @@ Each source is missing something the others have:
 Langfuse's own output-token field excludes reasoning tokens, so tokens and cost come from
 the log's provider-reported usage and are cross-checked against Langfuse totals.
 
-Read-only. Usage:  python p5-deployment/scripts/system_metrics.py [--model Qwen/Qwen3-8B]
+Read-only. Usage:  python backend/scripts/system_metrics.py [--model Qwen/Qwen3-8B]
 """
 
 import argparse
