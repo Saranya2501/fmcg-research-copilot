@@ -1,0 +1,2 @@
+# Runtime dependencies for Docker and direct Python startup.
+-r backend/requirements.txt

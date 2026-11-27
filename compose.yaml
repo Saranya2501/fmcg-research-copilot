@@ -1,0 +1,3 @@
+# Run from the repository root: docker compose up --build -d
+include:
+  - backend/docker-compose.yml
